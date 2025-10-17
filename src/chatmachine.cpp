@@ -7,6 +7,7 @@
 
 #include "chatmachine.h"
 #include "categorylist.h"
+#include "opencog_aiml.h"
 #include <iostream>
 #include <cstdlib>
 #include <time.h>
@@ -116,7 +117,7 @@ string strategy = "alice";
 
 int main(int argc, char* argv[])
 {
-    cout << "Chatmachine v2.0 Copyright (C) 2017 Simon Grandsire\n" << endl;
+    cout << "Chatmachine v2.0 with OpenCog Integration Copyright (C) 2017 Simon Grandsire\n" << endl;
 
     Chatmachine cm("Chatmachine");
 
@@ -124,6 +125,16 @@ int main(int argc, char* argv[])
         if (string(argv[1]) == "basic") {
             strategy = "basic";
             dataDir = "database/Basic/";
+        } else if (string(argv[1]) == "opencog") {
+            strategy = "alice";
+            dataDir = "database/Alice/";
+            cm.setOpenCogMode(true);
+            cout << "OpenCog cognitive mode enabled!" << endl;
+        } else if (string(argv[1]) == "noopencog") {
+            strategy = "alice";
+            dataDir = "database/Alice/";
+            cm.setOpenCogMode(false);
+            cout << "OpenCog mode disabled - using traditional AIML only." << endl;
         } else {
             strategy = "alice";
             dataDir = "database/Alice/";
@@ -137,9 +148,20 @@ int main(int argc, char* argv[])
 
     cm.createCategoryLists();
 
+    cout << "Type 'stats' to see knowledge statistics, 'quit' to exit." << endl;
+
     while(1) {
         try {
             cm.listen();
+            
+            if (cm.m_sInput == "quit" || cm.m_sInput == "exit") {
+                cout << "Goodbye!" << endl;
+                break;
+            } else if (cm.m_sInput == "stats") {
+                cm.showKnowledgeStats();
+                continue;
+            }
+            
             cm.respond();
         } catch(std::string message) {
             cerr << message << endl;
@@ -153,6 +175,17 @@ int main(int argc, char* argv[])
 
 void Chatmachine::init_random() {
     srand((unsigned) time(NULL));
+}
+
+Chatmachine::Chatmachine(string str)
+    : m_sChatBotName(str), m_sInput(""), m_bInput_prepared(0), m_nFileIndex(0), m_sPrevResponse(""), m_bOpenCogEnabled(true), m_pOpenCogIntegration(nullptr)
+{
+    init_random();
+    // OpenCog initialization will happen after categories are loaded
+}
+
+Chatmachine::~Chatmachine() {
+    // Destructor - unique_ptr will automatically clean up
 }
 
 void Chatmachine::listen() {
@@ -180,7 +213,27 @@ void Chatmachine::respond() {
 
     shuffle();
 
-    response = get_response(m_sInput);
+    // Use OpenCog enhanced response if enabled
+    if (m_bOpenCogEnabled && m_pOpenCogIntegration) {
+        vector<aiml::Category*> allCategories;
+        for (auto& categoryList : cls) {
+            for (auto& category : categoryList->getCategories()) {
+                allCategories.push_back(category);
+            }
+        }
+        
+        response = m_pOpenCogIntegration->enhancedPatternMatch(m_sInput, allCategories);
+        
+        // Learn from this interaction
+        if (!response.empty()) {
+            m_pOpenCogIntegration->learnFromInteraction(m_sInput, response, 0.8);
+        }
+    }
+    
+    // Fall back to traditional AIML if no OpenCog response
+    if (response.empty()) {
+        response = get_response(m_sInput);
+    }
 
     if (response.empty()) {
         cout << sBotPrompt <<  "I don't understand what you're saying." << endl;
@@ -290,6 +343,27 @@ void Chatmachine::createCategoryLists() {
 
     //to do
     //cout << cl << endl;
+    
+    // Initialize OpenCog with loaded categories after successful loading
+    if (m_bOpenCogEnabled) {
+        try {
+            initializeOpenCog();
+            
+            vector<aiml::Category*> allCategories;
+            for (auto& categoryList : cls) {
+                const auto& categories = categoryList->getCategories();
+                allCategories.insert(allCategories.end(), categories.begin(), categories.end());
+            }
+            
+            if (m_pOpenCogIntegration) {
+                m_pOpenCogIntegration->initializeFromCategories(allCategories);
+                cout << "OpenCog knowledge base initialized with " << allCategories.size() << " categories." << endl;
+            }
+        } catch (const exception& e) {
+            cerr << "OpenCog initialization failed: " << e.what() << endl;
+            m_bOpenCogEnabled = false;
+        }
+    }
 }
 
 void Chatmachine::shuffle() {
@@ -308,5 +382,23 @@ void Chatmachine::shuffle() {
 
         cls.push_back(cls_[i]);
         cls_.erase(cls_.begin() + i);
+    }
+}
+
+void Chatmachine::initializeOpenCog() {
+    try {
+        m_pOpenCogIntegration = unique_ptr<opencog_aiml::OpenCogAIMLIntegration>(new opencog_aiml::OpenCogAIMLIntegration());
+        cout << "OpenCog integration initialized successfully." << endl;
+    } catch (const exception& e) {
+        cerr << "Failed to initialize OpenCog: " << e.what() << endl;
+        m_bOpenCogEnabled = false;
+    }
+}
+
+void Chatmachine::showKnowledgeStats() {
+    if (m_pOpenCogIntegration) {
+        m_pOpenCogIntegration->printKnowledgeStats();
+    } else {
+        cout << "OpenCog integration not available." << endl;
     }
 }

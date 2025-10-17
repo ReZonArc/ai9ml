@@ -21,6 +21,9 @@ namespace aiml {
         Category* child(int index);
         string file();
         unsigned int size();
+        
+        // Access to categories vector
+        const vector<Category*>& getCategories() const { return m_vChildren; }
 
     private:
 
