@@ -178,10 +178,10 @@ void Chatmachine::init_random() {
 }
 
 Chatmachine::Chatmachine(string str)
-    : m_sChatBotName(str), m_sInput(""), m_bInput_prepared(0), m_nFileIndex(0), m_sPrevResponse(""), m_bOpenCogEnabled(true)
+    : m_sChatBotName(str), m_sInput(""), m_bInput_prepared(0), m_nFileIndex(0), m_sPrevResponse(""), m_bOpenCogEnabled(true), m_pOpenCogIntegration(nullptr)
 {
     init_random();
-    initializeOpenCog();
+    // OpenCog initialization will happen after categories are loaded
 }
 
 Chatmachine::~Chatmachine() {
@@ -344,16 +344,25 @@ void Chatmachine::createCategoryLists() {
     //to do
     //cout << cl << endl;
     
-    // Initialize OpenCog with loaded categories
-    if (m_bOpenCogEnabled && m_pOpenCogIntegration) {
-        vector<aiml::Category*> allCategories;
-        for (auto& categoryList : cls) {
-            const auto& categories = categoryList->getCategories();
-            allCategories.insert(allCategories.end(), categories.begin(), categories.end());
+    // Initialize OpenCog with loaded categories after successful loading
+    if (m_bOpenCogEnabled) {
+        try {
+            initializeOpenCog();
+            
+            vector<aiml::Category*> allCategories;
+            for (auto& categoryList : cls) {
+                const auto& categories = categoryList->getCategories();
+                allCategories.insert(allCategories.end(), categories.begin(), categories.end());
+            }
+            
+            if (m_pOpenCogIntegration) {
+                m_pOpenCogIntegration->initializeFromCategories(allCategories);
+                cout << "OpenCog knowledge base initialized with " << allCategories.size() << " categories." << endl;
+            }
+        } catch (const exception& e) {
+            cerr << "OpenCog initialization failed: " << e.what() << endl;
+            m_bOpenCogEnabled = false;
         }
-        
-        m_pOpenCogIntegration->initializeFromCategories(allCategories);
-        cout << "OpenCog knowledge base initialized with " << allCategories.size() << " categories." << endl;
     }
 }
 
