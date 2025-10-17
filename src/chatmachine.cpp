@@ -8,6 +8,7 @@
 #include "chatmachine.h"
 #include "categorylist.h"
 #include "opencog_aiml.h"
+#include "chatgpt4o.h"
 #include <iostream>
 #include <cstdlib>
 #include <time.h>
@@ -117,7 +118,7 @@ string strategy = "alice";
 
 int main(int argc, char* argv[])
 {
-    cout << "Chatmachine v2.0 with OpenCog Integration Copyright (C) 2017 Simon Grandsire\n" << endl;
+    cout << "Chatmachine v2.1 with OpenCog + ChatGPT-4o Integration Copyright (C) 2017-2024 Simon Grandsire\n" << endl;
 
     Chatmachine cm("Chatmachine");
 
@@ -130,6 +131,18 @@ int main(int argc, char* argv[])
             dataDir = "database/Alice/";
             cm.setOpenCogMode(true);
             cout << "OpenCog cognitive mode enabled!" << endl;
+        } else if (string(argv[1]) == "chatgpt4o") {
+            strategy = "basic";
+            dataDir = "database/Basic/";
+            cm.setOpenCogMode(false);  // Disable OpenCog for ChatGPT-4o only mode
+            cm.setChatGPT4oMode(true);
+            cout << "ChatGPT-4o mode enabled (OpenCog disabled)!" << endl;
+        } else if (string(argv[1]) == "full") {
+            strategy = "basic";  // Use basic for demo since Alice files don't exist
+            dataDir = "database/Basic/";
+            cm.setOpenCogMode(true);
+            cm.setChatGPT4oMode(true);
+            cout << "Full AI mode enabled (OpenCog + ChatGPT-4o)!" << endl;
         } else if (string(argv[1]) == "noopencog") {
             strategy = "alice";
             dataDir = "database/Alice/";
@@ -148,7 +161,7 @@ int main(int argc, char* argv[])
 
     cm.createCategoryLists();
 
-    cout << "Type 'stats' to see knowledge statistics, 'quit' to exit." << endl;
+    cout << "Type 'stats' to see knowledge statistics, 'gpt4o' to see ChatGPT-4o config, 'quit' to exit." << endl;
 
     while(1) {
         try {
@@ -159,6 +172,9 @@ int main(int argc, char* argv[])
                 break;
             } else if (cm.m_sInput == "stats") {
                 cm.showKnowledgeStats();
+                continue;
+            } else if (cm.m_sInput == "gpt4o") {
+                cm.showChatGPT4oConfig();
                 continue;
             }
             
@@ -178,10 +194,12 @@ void Chatmachine::init_random() {
 }
 
 Chatmachine::Chatmachine(string str)
-    : m_sChatBotName(str), m_sInput(""), m_bInput_prepared(0), m_nFileIndex(0), m_sPrevResponse(""), m_bOpenCogEnabled(true), m_pOpenCogIntegration(nullptr)
+    : m_sChatBotName(str), m_sInput(""), m_bInput_prepared(0), m_nFileIndex(0), m_sPrevResponse(""), 
+      m_bOpenCogEnabled(false), m_pOpenCogIntegration(nullptr),  // Default to disabled
+      m_bChatGPT4oEnabled(false), m_pChatGPT4oIntegration(nullptr)
 {
     init_random();
-    // OpenCog initialization will happen after categories are loaded
+    // OpenCog and ChatGPT-4o initialization will happen after categories are loaded
 }
 
 Chatmachine::~Chatmachine() {
@@ -234,11 +252,36 @@ void Chatmachine::respond() {
     if (response.empty()) {
         response = get_response(m_sInput);
     }
+    
+    // Use ChatGPT-4o as final fallback if enabled and no good response found
+    if ((response.empty() || response == "I don't understand what you're saying.") && 
+        m_bChatGPT4oEnabled && m_pChatGPT4oIntegration && m_pChatGPT4oIntegration->isConfigured()) {
+        
+        cout << "[Consulting ChatGPT-4o...]" << endl;
+        string gptResponse = m_pChatGPT4oIntegration->generateContextualResponse(m_sInput, m_conversationHistory);
+        
+        if (!gptResponse.empty()) {
+            response = gptResponse;
+            // Add ChatGPT-4o indicator
+            response = "[GPT-4o] " + response;
+        }
+    }
 
     if (response.empty()) {
         cout << sBotPrompt <<  "I don't understand what you're saying." << endl;
     } else {
         setResponse(response);
+        
+        // Update conversation history for ChatGPT-4o context
+        if (m_bChatGPT4oEnabled) {
+            m_conversationHistory.push_back(m_sInput);
+            m_conversationHistory.push_back(response);
+            
+            // Keep only recent history (last 10 exchanges)
+            if (m_conversationHistory.size() > 20) {
+                m_conversationHistory.erase(m_conversationHistory.begin(), m_conversationHistory.begin() + 2);
+            }
+        }
 
         cout << sBotPrompt << m_sResponse << endl;
     }
@@ -364,6 +407,17 @@ void Chatmachine::createCategoryLists() {
             m_bOpenCogEnabled = false;
         }
     }
+    
+    // Initialize ChatGPT-4o if enabled
+    if (m_bChatGPT4oEnabled) {
+        try {
+            initializeChatGPT4o();
+            cout << "ChatGPT-4o integration initialized." << endl;
+        } catch (const exception& e) {
+            cerr << "ChatGPT-4o initialization failed: " << e.what() << endl;
+            m_bChatGPT4oEnabled = false;
+        }
+    }
 }
 
 void Chatmachine::shuffle() {
@@ -400,5 +454,41 @@ void Chatmachine::showKnowledgeStats() {
         m_pOpenCogIntegration->printKnowledgeStats();
     } else {
         cout << "OpenCog integration not available." << endl;
+    }
+}
+
+void Chatmachine::initializeChatGPT4o() {
+    try {
+        m_pChatGPT4oIntegration = unique_ptr<chatgpt4o::ChatGPT4oIntegration>(new chatgpt4o::ChatGPT4oIntegration());
+        
+        // Try to read API key from environment variable
+        const char* apiKey = getenv("OPENAI_API_KEY");
+        if (apiKey) {
+            m_pChatGPT4oIntegration->setApiKey(string(apiKey));
+            cout << "ChatGPT-4o API key loaded from environment." << endl;
+        } else {
+            cout << "No OPENAI_API_KEY environment variable found. ChatGPT-4o will run in simulation mode." << endl;
+        }
+        
+        cout << "ChatGPT-4o integration initialized successfully." << endl;
+    } catch (const exception& e) {
+        cerr << "Failed to initialize ChatGPT-4o: " << e.what() << endl;
+        m_bChatGPT4oEnabled = false;
+    }
+}
+
+void Chatmachine::setChatGPT4oApiKey(const string& apiKey) {
+    if (m_pChatGPT4oIntegration) {
+        m_pChatGPT4oIntegration->setApiKey(apiKey);
+    }
+}
+
+void Chatmachine::showChatGPT4oConfig() {
+    if (m_pChatGPT4oIntegration) {
+        m_pChatGPT4oIntegration->printConfiguration();
+        cout << "Enabled: " << (m_bChatGPT4oEnabled ? "Yes" : "No") << endl;
+        cout << "Conversation history length: " << m_conversationHistory.size() << endl;
+    } else {
+        cout << "ChatGPT-4o integration not available." << endl;
     }
 }

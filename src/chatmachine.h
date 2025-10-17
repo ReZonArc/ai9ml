@@ -12,6 +12,10 @@ namespace opencog_aiml {
     class OpenCogAIMLIntegration;
 }
 
+namespace chatgpt4o {
+    class ChatGPT4oIntegration;
+}
+
 class Chatmachine {
 public:
     Chatmachine (string str);
@@ -25,6 +29,12 @@ public:
     void initializeOpenCog();
     void showKnowledgeStats();
     void setOpenCogMode(bool enabled) { m_bOpenCogEnabled = enabled; }
+    
+    // ChatGPT-4o integration methods
+    void initializeChatGPT4o();
+    void setChatGPT4oMode(bool enabled) { m_bChatGPT4oEnabled = enabled; }
+    void setChatGPT4oApiKey(const string& apiKey);
+    void showChatGPT4oConfig();
     
     // Public access to input for main loop
     string m_sInput;
@@ -53,6 +63,11 @@ private:
     // OpenCog integration
     unique_ptr<opencog_aiml::OpenCogAIMLIntegration> m_pOpenCogIntegration;
     bool m_bOpenCogEnabled;
+    
+    // ChatGPT-4o integration
+    unique_ptr<chatgpt4o::ChatGPT4oIntegration> m_pChatGPT4oIntegration;
+    bool m_bChatGPT4oEnabled;
+    vector<string> m_conversationHistory;
 };
 
 #endif
