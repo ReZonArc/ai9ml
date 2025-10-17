@@ -195,7 +195,7 @@ void Chatmachine::init_random() {
 
 Chatmachine::Chatmachine(string str)
     : m_sChatBotName(str), m_sInput(""), m_bInput_prepared(0), m_nFileIndex(0), m_sPrevResponse(""), 
-      m_bOpenCogEnabled(false), m_pOpenCogIntegration(nullptr),  // Default to disabled
+      m_bOpenCogEnabled(true), m_pOpenCogIntegration(nullptr),  // Keep original default (enabled)
       m_bChatGPT4oEnabled(false), m_pChatGPT4oIntegration(nullptr)
 {
     init_random();

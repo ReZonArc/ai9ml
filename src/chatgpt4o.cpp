@@ -173,14 +173,17 @@ string ChatGPT4oIntegration::extractResponseFromJson(const string& jsonResponse)
         content.replace(pos, 2, "\"");
         pos += 1;
     }
+    pos = 0;
     while ((pos = content.find("\\n", pos)) != string::npos) {
         content.replace(pos, 2, "\n");
         pos += 1;
     }
+    pos = 0;
     while ((pos = content.find("\\t", pos)) != string::npos) {
         content.replace(pos, 2, "\t");
         pos += 1;
     }
+    pos = 0;
     while ((pos = content.find("\\\\", pos)) != string::npos) {
         content.replace(pos, 2, "\\");
         pos += 1;
