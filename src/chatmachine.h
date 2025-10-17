@@ -3,20 +3,31 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 
 using namespace std;
 
+// Forward declarations
+namespace opencog_aiml {
+    class OpenCogAIMLIntegration;
+}
+
 class Chatmachine {
 public:
-    Chatmachine (string str)
-        :m_sChatBotName(str), m_sInput(""), m_bInput_prepared(0), m_nFileIndex(0), m_sPrevResponse("")
-    {
-        init_random();
-    }
+    Chatmachine (string str);
+    ~Chatmachine();  // Add destructor
 
     void listen();
     void respond();
     void createCategoryLists();
+    
+    // OpenCog integration methods
+    void initializeOpenCog();
+    void showKnowledgeStats();
+    void setOpenCogMode(bool enabled) { m_bOpenCogEnabled = enabled; }
+    
+    // Public access to input for main loop
+    string m_sInput;
 
 private:
     void init_random();
@@ -29,7 +40,6 @@ private:
 
 private:
     string m_sChatBotName;
-    string m_sInput;
     string m_sResponse;
     string m_sPrevInput;
     string m_sPrevResponse;
@@ -39,6 +49,10 @@ private:
     bool m_bInput_prepared;
     unsigned int m_nFileIndex;
     vector<string> response_list;
+    
+    // OpenCog integration
+    unique_ptr<opencog_aiml::OpenCogAIMLIntegration> m_pOpenCogIntegration;
+    bool m_bOpenCogEnabled;
 };
 
 #endif

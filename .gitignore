@@ -25,6 +25,7 @@ obj/
 *.out
 *.app
 bin/
+chatmachine9
 
 # Databases
 database/
