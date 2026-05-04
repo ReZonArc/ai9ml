@@ -26,7 +26,13 @@ namespace chatgpt4o {
         
         // Core functionality
         string generateResponse(const string& input);
-        string generateContextualResponse(const string& input, const vector<string>& conversationHistory);
+        string generateContextualResponse(const string& input,
+                                          const vector<string>& conversationHistory);
+
+        // NSVD: constraint-guided generation with an injected system prompt.
+        string generateConstrainedResponse(const string& input,
+                                           const vector<string>& conversationHistory,
+                                           const string& systemConstraintPrompt);
         
         // Status and debugging
         bool isConfigured() const;

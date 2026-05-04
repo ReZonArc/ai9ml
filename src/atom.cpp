@@ -193,3 +193,18 @@ string ImplicationLink::toString() const {
     ss << ", tv=" << m_truthValue << ")";
     return ss.str();
 }
+
+// SimilarityLink implementation
+SimilarityLink::SimilarityLink(shared_ptr<Atom> atom1, shared_ptr<Atom> atom2)
+    : Link(SIMILARITY_LINK, {atom1, atom2}) {
+}
+
+string SimilarityLink::toString() const {
+    stringstream ss;
+    ss << "SimilarityLink(";
+    ss << (m_outgoing[0] ? m_outgoing[0]->getName() : "null");
+    ss << " ~ ";
+    ss << (m_outgoing[1] ? m_outgoing[1]->getName() : "null");
+    ss << ", tv=" << m_truthValue << ")";
+    return ss.str();
+}

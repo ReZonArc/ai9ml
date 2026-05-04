@@ -2,7 +2,7 @@ CC = g++
 CFLAGS = -Wall -std=c++11
 EXEC_NAME = chatmachine9
 INCLUDES =
-LIBS =
+LIBS = -pthread
 DEPS = $(wildcard src/*.h)
 CPP_FILES = $(wildcard src/*.cpp)
 OBJ_FILES = $(addprefix obj/,$(notdir $(CPP_FILES:.cpp=.o)))

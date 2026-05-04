@@ -93,6 +93,68 @@ string ChatGPT4oIntegration::generateContextualResponse(const string& input, con
     }
 }
 
+string ChatGPT4oIntegration::generateConstrainedResponse(
+    const string& input,
+    const vector<string>& conversationHistory,
+    const string& systemConstraintPrompt)
+{
+    if (!isConfigured()) {
+        m_lastError = "API key not configured";
+        return "";
+    }
+
+    try {
+        // Build payload with the constraint-aware system prompt.
+        stringstream payload;
+        payload << "{";
+        payload << "\"model\":\"" << m_model << "\",";
+        payload << "\"temperature\":" << m_temperature << ",";
+        payload << "\"max_tokens\":" << m_maxTokens << ",";
+        payload << "\"messages\":[";
+
+        // Use the injected system prompt instead of the default one.
+        string sysMsg = systemConstraintPrompt.empty()
+            ? "You are a helpful AI assistant integrated into an AIML chatbot."
+            : systemConstraintPrompt;
+        payload << "{\"role\":\"system\",\"content\":\""
+                << escapeJsonString(sysMsg) << "\"},";
+
+        // Add conversation history.
+        for (size_t i = 0; i < conversationHistory.size() && i < 10; i += 2) {
+            if (i + 1 < conversationHistory.size()) {
+                payload << "{\"role\":\"user\",\"content\":\""
+                        << escapeJsonString(conversationHistory[i]) << "\"},";
+                payload << "{\"role\":\"assistant\",\"content\":\""
+                        << escapeJsonString(conversationHistory[i + 1]) << "\"},";
+            }
+        }
+
+        payload << "{\"role\":\"user\",\"content\":\""
+                << escapeJsonString(input) << "\"}";
+        payload << "]}";
+
+        stringstream headerStream;
+        headerStream << "Content-Type: application/json\r\n";
+        headerStream << "Authorization: Bearer " << m_apiKey << "\r\n";
+        headerStream << "Content-Length: " << payload.str().length() << "\r\n";
+
+        string url = "https://api.openai.com/v1/chat/completions";
+        string response = makeHttpRequest(url, headerStream.str(), payload.str());
+
+        if (response.empty()) {
+            m_lastError = "Failed to get response from OpenAI API (constrained)";
+            return "";
+        }
+
+        return extractResponseFromJson(response);
+
+    } catch (const exception& e) {
+        m_lastError = "Exception in generateConstrainedResponse: " +
+                      string(e.what());
+        return "";
+    }
+}
+
 string ChatGPT4oIntegration::buildOpenAIPayload(const string& input, const vector<string>& conversationHistory) {
     stringstream payload;
     payload << "{";

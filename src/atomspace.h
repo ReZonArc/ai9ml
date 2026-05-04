@@ -49,7 +49,30 @@ namespace opencog {
         string generateAIMLPattern(const string& input) const;
         vector<string> getRelatedResponses(const string& input) const;
         void learnFromAIMLCategory(const string& pattern, const string& template_str);
-        
+
+        // --- NSVD additions ---
+
+        // Similarity links (used by DiffusionEngine conceptual interpolation).
+        shared_ptr<SimilarityLink> addSimilarityLink(
+            shared_ptr<Atom> atom1, shared_ptr<Atom> atom2, double weight = 0.5);
+
+        // Trust propagation: spread a fraction of origin's truth value to
+        // its immediate link-neighbours, recursively up to maxDepth hops.
+        void propagateTrust(shared_ptr<Atom> origin,
+                            double fraction = 0.3,
+                            int    maxDepth = 3);
+
+        // Create a blended ConceptNode whose name is "A~B" and whose truth
+        // value is the average of A and B's truth values, connected by a
+        // SimilarityLink.  Returns nullptr if either concept is unknown.
+        shared_ptr<ConceptNode> interpolateConcepts(
+            const string& conceptA, const string& conceptB,
+            double weight = 0.5);
+
+        // Remove atoms whose truth value < minConfidence AND whose name
+        // contains "~" (temporary blended concepts).
+        void garbageCollectBlends(double minConfidence = 0.05);
+
         // Statistics and debugging
         size_t size() const { return m_atoms.size(); }
         void printStatistics() const;
@@ -78,6 +101,13 @@ namespace opencog {
         // Learning and inference
         void inferRelationships();
         void updateTruthValues();
+
+        // Trust propagation recursive helper.
+        void propagateTrustImpl(shared_ptr<Atom> atom,
+                                double fraction,
+                                int    depth,
+                                int    maxDepth,
+                                unordered_set<size_t>& visited);
     };
     
     /**

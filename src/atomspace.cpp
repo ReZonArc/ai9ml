@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <regex>
 #include <cctype>
+#include <unordered_set>
+#include <map>
 
 using namespace opencog;
 
@@ -372,7 +374,123 @@ bool AtomSpace::matchesPattern(shared_ptr<Atom> atom, const string& pattern) con
     return atomStr.find(patternStr) != string::npos;
 }
 
-// AtomSpaceManager implementation
+bool AtomSpace::saveToFile(const string& filename) const {
+    // Placeholder – full serialisation not required for NSVD operation.
+    (void)filename;
+    return false;
+}
+
+bool AtomSpace::loadFromFile(const string& filename) {
+    (void)filename;
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// NSVD additions
+// ---------------------------------------------------------------------------
+
+shared_ptr<SimilarityLink> AtomSpace::addSimilarityLink(
+    shared_ptr<Atom> atom1, shared_ptr<Atom> atom2, double weight)
+{
+    if (!atom1 || !atom2) return nullptr;
+    auto link = make_shared<SimilarityLink>(atom1, atom2);
+    link->setTruthValue(weight);
+    auto added = addAtom(link);
+    return dynamic_pointer_cast<SimilarityLink>(added);
+}
+
+void AtomSpace::propagateTrust(shared_ptr<Atom> origin,
+                                double fraction,
+                                int    maxDepth)
+{
+    if (!origin || maxDepth <= 0 || fraction <= 0.0) return;
+    unordered_set<size_t> visited;
+    propagateTrustImpl(origin, fraction, 0, maxDepth, visited);
+}
+
+void AtomSpace::propagateTrustImpl(
+    shared_ptr<Atom> atom,
+    double           fraction,
+    int              depth,
+    int              maxDepth,
+    unordered_set<size_t>& visited)
+{
+    if (!atom || depth > maxDepth) return;
+    size_t h = atom->hashCode();
+    if (visited.count(h)) return;
+    visited.insert(h);
+
+    double delta = atom->getTruthValue() * fraction;
+    if (delta < 1e-4) return;
+
+    // Propagate to all atoms reachable through links that mention this atom.
+    for (const auto& a : m_atoms) {
+        if (!a) continue;
+        // Only propagate through Link atoms.
+        auto lnk = dynamic_pointer_cast<Link>(a);
+        if (!lnk) continue;
+        for (const auto& out : lnk->getOutgoingSet()) {
+            if (out == atom) {
+                // Update truth value of the link itself.
+                double newTV = min(1.0, lnk->getTruthValue() + delta);
+                lnk->setTruthValue(newTV);
+                // Recurse into the other atoms of this link.
+                for (const auto& peer : lnk->getOutgoingSet()) {
+                    if (peer && peer != atom) {
+                        double peerTV = min(1.0, peer->getTruthValue() + delta * 0.5);
+                        peer->setTruthValue(peerTV);
+                        propagateTrustImpl(peer, fraction * 0.5, depth + 1, maxDepth, visited);
+                    }
+                }
+                break;
+            }
+        }
+    }
+}
+
+shared_ptr<ConceptNode> AtomSpace::interpolateConcepts(
+    const string& conceptA, const string& conceptB, double weight)
+{
+    auto atomA = getAtom(CONCEPT_NODE, conceptA);
+    auto atomB = getAtom(CONCEPT_NODE, conceptB);
+    if (!atomA || !atomB) return nullptr;
+
+    string blendName = conceptA + "~" + conceptB;
+    auto existing = getAtom(CONCEPT_NODE, blendName);
+    if (existing) return dynamic_pointer_cast<ConceptNode>(existing);
+
+    double blendedTV = atomA->getTruthValue() * (1.0 - weight)
+                     + atomB->getTruthValue() * weight;
+    auto blendNode = make_shared<ConceptNode>(blendName);
+    blendNode->setTruthValue(blendedTV);
+    addAtom(blendNode);
+
+    // Connect with a SimilarityLink to both parents.
+    addSimilarityLink(blendNode, atomA, blendedTV);
+    addSimilarityLink(blendNode, atomB, blendedTV);
+
+    return blendNode;
+}
+
+void AtomSpace::garbageCollectBlends(double minConfidence) {
+    vector<shared_ptr<Atom>> toRemove;
+    for (const auto& atom : m_atoms) {
+        if (!atom) continue;
+        if (atom->getName().find('~') != string::npos &&
+            atom->getTruthValue() < minConfidence)
+        {
+            toRemove.push_back(atom);
+        }
+    }
+    for (const auto& atom : toRemove) {
+        removeFromIndex(atom);
+        m_atoms.erase(atom);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Persistence stubs (declared in header, implemented here)
+// ---------------------------------------------------------------------------
 unique_ptr<AtomSpace> AtomSpaceManager::s_instance = nullptr;
 
 AtomSpace& AtomSpaceManager::getInstance() {

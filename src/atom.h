@@ -158,6 +158,20 @@ namespace opencog {
         
         string toString() const override;
     };
+    /**
+     * SimilarityLink — represents a graded semantic similarity between two atoms.
+     * Used by the diffusion engine for conceptual interpolation.
+     */
+    class SimilarityLink : public Link {
+    public:
+        SimilarityLink(shared_ptr<Atom> atom1, shared_ptr<Atom> atom2);
+        virtual ~SimilarityLink() = default;
+
+        shared_ptr<Atom> getFirstAtom()  const { return m_outgoing[0]; }
+        shared_ptr<Atom> getSecondAtom() const { return m_outgoing[1]; }
+
+        string toString() const override;
+    };
 }
 
 #endif // __ATOM_H__
