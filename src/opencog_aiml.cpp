@@ -413,7 +413,11 @@ void OpenCogAIMLIntegration::updateContextVector(const string& text,
                                                    double weight) {
     auto concepts = extractConcepts(text);
     for (const auto& c : concepts) {
-        m_contextVector[c] = min(1.0, m_contextVector[c] + weight);
+        auto it = m_contextVector.find(c);
+        if (it != m_contextVector.end())
+            it->second = min(1.0, it->second + weight);
+        else
+            m_contextVector[c] = min(1.0, weight);
     }
 }
 

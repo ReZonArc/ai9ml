@@ -13,7 +13,7 @@ using namespace diffusion_engine;
 // ---------------------------------------------------------------------------
 
 DiffusionEngine::DiffusionEngine(AtomSpace& atomSpace)
-    : m_atomSpace(atomSpace), m_temperature(1.0) {}
+    : m_atomSpace(atomSpace), m_temperature(1.0), m_consolidationCounter(0) {}
 
 // --- Temperature ---
 
@@ -101,8 +101,10 @@ int DiffusionEngine::consolidateLearnedCategories(
     }
 
     // Write a single AIML file for this consolidation pass.
+    // Use a per-instance counter to avoid filename collisions within the same second.
     string filename = outputDir + "/learned_" +
-                      to_string((long long)time(nullptr)) + ".aiml";
+                      to_string((long long)time(nullptr)) + "_" +
+                      to_string(m_consolidationCounter++) + ".aiml";
     ofstream out(filename);
     if (!out.is_open()) {
         cerr << "[DiffusionEngine] Cannot write to " << filename << endl;

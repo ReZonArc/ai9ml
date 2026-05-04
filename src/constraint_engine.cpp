@@ -5,6 +5,9 @@
 
 using namespace constraint_engine;
 
+// Maximum characters shown from a recent response in the constraint prompt.
+static const int kRecentResponsePreviewLen = 60;
+
 // ---------------------------------------------------------------------------
 // ConstraintEngine — public interface
 // ---------------------------------------------------------------------------
@@ -78,9 +81,11 @@ string ConstraintEngine::buildGPT4oConstraintPrompt(
         for (int i = (int)recentResponses.size() - window;
              i < (int)recentResponses.size(); ++i) {
             if (i >= 0 && !recentResponses[i].empty()) {
-                prompt << " [" << recentResponses[i].substr(
-                    0, min((int)recentResponses[i].size(), 60)) << "...]";
-            }
+                    int previewLen = min((int)recentResponses[i].size(),
+                                         kRecentResponsePreviewLen);
+                    prompt << " [" << recentResponses[i].substr(0, previewLen)
+                           << "...]";
+                }
         }
     }
 

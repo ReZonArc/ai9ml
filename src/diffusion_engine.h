@@ -78,6 +78,7 @@ namespace diffusion_engine {
     private:
         AtomSpace& m_atomSpace;
         double     m_temperature;
+        int        m_consolidationCounter; // prevents filename collisions in consolidation
 
         // Names of concepts that were created by interpolation.
         unordered_set<string> m_blendedConcepts;

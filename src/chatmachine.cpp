@@ -639,16 +639,24 @@ string Chatmachine::nsvd_respond() {
         });
 
     // 5. Collect results within a time budget.
-    SymbolicResult symbResult  = {""  , 0.0, 0.0};
+    SymbolicResult symbResult   = {"", 0.0, 0.0};
     SymbolicResult subSymResult = {"", 0.0, 0.0};
 
     try {
         symbResult = symbFuture.get();
-    } catch (...) {}
+    } catch (const exception& e) {
+        cerr << "[NSVD] Symbolic path error: " << e.what() << endl;
+    } catch (...) {
+        cerr << "[NSVD] Symbolic path: unknown error" << endl;
+    }
 
     try {
         subSymResult = subSymFuture.get();
-    } catch (...) {}
+    } catch (const exception& e) {
+        cerr << "[NSVD] Sub-symbolic path error: " << e.what() << endl;
+    } catch (...) {
+        cerr << "[NSVD] Sub-symbolic path: unknown error" << endl;
+    }
 
     // 6. Build candidate list.
     vector<ResponseCandidate> candidates;
@@ -785,8 +793,11 @@ void Chatmachine::maybeSynthesizeCategory(const string& input,
     // Strip GPT-4o prefix for the stored template.
     string cleanResponse = response;
     const string prefix = "[GPT-4o] ";
-    if (cleanResponse.substr(0, prefix.size()) == prefix)
+    if (cleanResponse.size() >= prefix.size() &&
+        cleanResponse.substr(0, prefix.size()) == prefix)
+    {
         cleanResponse = cleanResponse.substr(prefix.size());
+    }
 
     aiml::Category* cat = m_pLearnableCategoryList->synthesize(input,
                                                                  cleanResponse);

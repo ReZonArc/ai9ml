@@ -78,7 +78,7 @@ namespace opencog {
         void printStatistics() const;
         void clear();
         
-        // Persistence
+        // Persistence (currently unimplemented stubs; return false).
         bool saveToFile(const string& filename) const;
         bool loadFromFile(const string& filename);
         
