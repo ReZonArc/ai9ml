@@ -250,7 +250,7 @@ Chatmachine::Chatmachine(string str)
       m_pPatternLattice(nullptr), m_pConstraintEngine(nullptr),
       m_pDiffusionEngine(nullptr), m_pLearnableCategoryList(nullptr),
       m_pHGNN(nullptr), m_pDTESNN(nullptr), m_pMLP(nullptr),
-      m_turnCount(0)
+      m_turnCount(0), m_lastOuterLoopCount(0)
 {
     init_random();
     // OpenCog, ChatGPT-4o, and NSVD initialization will happen after categories are loaded
@@ -801,7 +801,10 @@ string Chatmachine::nsvd_respond() {
 
         auto blendWeights = m_pMLP->forward(feat);
 
-        // Apply blend weights to corresponding candidate sources.
+        // Scale each candidate's base score by its MLP blend weight.
+        // The formula (0.5 + 0.5 * w * MLP_OUTPUT_DIM) maps a uniform weight
+        // of 1/MLP_OUTPUT_DIM back to 1.0 (neutral), while a dominant weight
+        // of 1.0 doubles the score and a weight of 0.0 halves it.
         for (auto& cand : candidates) {
             double w = 1.0;
             if      (cand.source == "aiml"    || cand.source == "learned") w = blendWeights[PATH_SYMBOLIC];
@@ -1083,18 +1086,19 @@ void Chatmachine::updateNSVDState(const string& input,
 
     // Middle-loop: HGNN forward pass (re-run message passing).
     if (m_bNSVDNeural && m_pHGNN && m_pDiffusionEngine) {
-        int inner = m_pDiffusionEngine->getInnerLoopCount();
-        int threshold = 10; // sync with DiffusionEngine default inner threshold
+        int inner     = m_pDiffusionEngine->getInnerLoopCount();
+        int threshold = m_pDiffusionEngine->getInnerThreshold();
         if (inner > 0 && inner % threshold == 0) {
             m_pHGNN->forwardPass();
         }
     }
 
-    // Outer-loop: MLP learning rate decay + DTESNN state reset hint.
+    // Outer-loop: MLP learning rate decay once per outer-loop completion.
     if (m_bNSVDNeural && m_pMLP && m_pDiffusionEngine) {
-        int outer = m_pDiffusionEngine->getOuterLoopCount();
-        if (outer > 0 && outer != (m_turnCount / 50)) {
+        int outerNow = m_pDiffusionEngine->getOuterLoopCount();
+        if (outerNow > m_lastOuterLoopCount) {
             m_pMLP->decayLearningRate(0.95);
+            m_lastOuterLoopCount = outerNow;
         }
     }
 

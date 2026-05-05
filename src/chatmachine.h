@@ -148,6 +148,7 @@ private:
 
     vector<string> m_recentResponses;   // rolling window for anti-repetition
     int            m_turnCount;
+    int            m_lastOuterLoopCount; // tracks outer-loop completion for lr decay
 };
 
 #endif

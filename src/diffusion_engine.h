@@ -102,6 +102,8 @@ namespace diffusion_engine {
 
         void setInnerThreshold(int n) { m_innerThreshold = n; }
         void setOuterThreshold(int n) { m_outerThreshold = n; }
+        int  getInnerThreshold() const { return m_innerThreshold; }
+        int  getOuterThreshold() const { return m_outerThreshold; }
 
         int getInnerLoopCount()  const { return m_innerCount;  }
         int getMiddleLoopCount() const { return m_middleCount; }

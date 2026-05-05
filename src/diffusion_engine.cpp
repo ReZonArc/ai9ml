@@ -185,10 +185,12 @@ void DiffusionEngine::middleLoopStep()
     // Blend garbage collection: remove stale interpolated concepts.
     garbageCollectBlends(0.05);
 
-    // Plateau detection: if temperature has fallen below 0.2, give it a
-    // small nudge to keep exploration alive in long sessions.
-    if (m_temperature < 0.20)
-        m_temperature = min(1.0, m_temperature + 0.05);
+    // Plateau detection: if temperature has fallen below PLATEAU_THRESHOLD,
+    // give it a small nudge to keep exploration alive in long sessions.
+    static const double PLATEAU_THRESHOLD = 0.20;
+    static const double PLATEAU_NUDGE     = 0.05;
+    if (m_temperature < PLATEAU_THRESHOLD)
+        m_temperature = min(1.0, m_temperature + PLATEAU_NUDGE);
 
     cout << "[DiffusionEngine] middle-loop " << m_middleCount
          << "  τ=" << m_temperature
