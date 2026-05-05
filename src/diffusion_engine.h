@@ -75,6 +75,38 @@ namespace diffusion_engine {
         // Print diffusion diagnostics.
         void printDiffusionStats() const;
 
+        // --- Nested learning loops (§5) ---
+        //
+        // Call innerLoopStep() once per conversation turn from
+        // Chatmachine::updateNSVDState().  It automatically triggers the
+        // middle loop every innerThreshold calls, and the outer loop every
+        // outerThreshold middle-loop completions.
+        //
+        //   Inner  loop (per-turn, default every 1):
+        //     - trust propagation, temperature decay, blend reinforcement.
+        //
+        //   Middle loop (default every 10 inner steps):
+        //     - blend garbage-collection, concept generalisation pass,
+        //       temperature plateau check.
+        //
+        //   Outer  loop (default every 5 middle-loop completions = 50 turns):
+        //     - AIML category consolidation, full blend GC,
+        //       temperature reset for next session segment.
+        //
+        // The Chatmachine may attach additional callbacks to these hooks by
+        // checking getInnerLoopCount() / getMiddleLoopCount() modulo thresholds.
+
+        void innerLoopStep();
+        void middleLoopStep();
+        void outerLoopStep();
+
+        void setInnerThreshold(int n) { m_innerThreshold = n; }
+        void setOuterThreshold(int n) { m_outerThreshold = n; }
+
+        int getInnerLoopCount()  const { return m_innerCount;  }
+        int getMiddleLoopCount() const { return m_middleCount; }
+        int getOuterLoopCount()  const { return m_outerCount;  }
+
     private:
         AtomSpace& m_atomSpace;
         double     m_temperature;
@@ -82,6 +114,13 @@ namespace diffusion_engine {
 
         // Names of concepts that were created by interpolation.
         unordered_set<string> m_blendedConcepts;
+
+        // Nested loop counters and thresholds.
+        int m_innerCount;      // total inner-loop steps executed
+        int m_middleCount;     // total middle-loop steps executed
+        int m_outerCount;      // total outer-loop steps executed
+        int m_innerThreshold;  // inner steps per middle-loop trigger (default 10)
+        int m_outerThreshold;  // middle steps per outer-loop trigger  (default 5)
 
         // Build an AIML <category> XML string from pattern/template strings.
         string formatAIMLCategory(const string& pattern,

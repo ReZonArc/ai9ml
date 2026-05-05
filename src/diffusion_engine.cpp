@@ -13,7 +13,10 @@ using namespace diffusion_engine;
 // ---------------------------------------------------------------------------
 
 DiffusionEngine::DiffusionEngine(AtomSpace& atomSpace)
-    : m_atomSpace(atomSpace), m_temperature(1.0), m_consolidationCounter(0) {}
+    : m_atomSpace(atomSpace), m_temperature(1.0), m_consolidationCounter(0),
+      m_innerCount(0), m_middleCount(0), m_outerCount(0),
+      m_innerThreshold(10), m_outerThreshold(5)
+{}
 
 // --- Temperature ---
 
@@ -150,7 +153,65 @@ void DiffusionEngine::printDiffusionStats() const {
     cout << "Temperature (tau): " << m_temperature << endl;
     cout << "Blended concepts:  " << m_blendedConcepts.size() << endl;
     cout << "AtomSpace size:    " << m_atomSpace.size() << endl;
+    cout << "Inner loop count:  " << m_innerCount
+         << "  (threshold " << m_innerThreshold << ")" << endl;
+    cout << "Middle loop count: " << m_middleCount
+         << "  (threshold " << m_outerThreshold << ")" << endl;
+    cout << "Outer loop count:  " << m_outerCount << endl;
     cout << "============================\n" << endl;
+}
+
+// ---------------------------------------------------------------------------
+// Nested learning loops
+// ---------------------------------------------------------------------------
+
+void DiffusionEngine::innerLoopStep()
+{
+    m_innerCount++;
+
+    // Temperature decay happens every inner step (already called from
+    // Chatmachine::updateNSVDState, but kept here for standalone use).
+    decayTemperature(0.97);
+
+    // Trigger middle loop.
+    if (m_innerCount % m_innerThreshold == 0)
+        middleLoopStep();
+}
+
+void DiffusionEngine::middleLoopStep()
+{
+    m_middleCount++;
+
+    // Blend garbage collection: remove stale interpolated concepts.
+    garbageCollectBlends(0.05);
+
+    // Plateau detection: if temperature has fallen below 0.2, give it a
+    // small nudge to keep exploration alive in long sessions.
+    if (m_temperature < 0.20)
+        m_temperature = min(1.0, m_temperature + 0.05);
+
+    cout << "[DiffusionEngine] middle-loop " << m_middleCount
+         << "  τ=" << m_temperature
+         << "  blends=" << m_blendedConcepts.size() << endl;
+
+    // Trigger outer loop.
+    if (m_middleCount % m_outerThreshold == 0)
+        outerLoopStep();
+}
+
+void DiffusionEngine::outerLoopStep()
+{
+    m_outerCount++;
+
+    // Full blend GC with tighter threshold.
+    garbageCollectBlends(0.10);
+
+    // Temperature reset: begin a new learning segment at moderate warmth.
+    resetTemperature(0.60);
+
+    cout << "[DiffusionEngine] outer-loop  " << m_outerCount
+         << "  τ reset → " << m_temperature
+         << "  AtomSpace=" << m_atomSpace.size() << endl;
 }
 
 // ---------------------------------------------------------------------------
