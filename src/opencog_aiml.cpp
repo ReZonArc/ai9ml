@@ -4,13 +4,16 @@
 #include <sstream>
 #include <algorithm>
 #include <regex>
+#include <map>
+#include <vector>
 
 using namespace opencog_aiml;
 
 // OpenCogAIMLIntegration implementation
-OpenCogAIMLIntegration::OpenCogAIMLIntegration() 
-    : m_atomSpace(AtomSpaceManager::getInstance()) {
-    
+OpenCogAIMLIntegration::OpenCogAIMLIntegration()
+    : m_atomSpace(AtomSpaceManager::getInstance()),
+      m_contextDecayFactor(0.85) {
+
     // Initialize with basic knowledge
     buildConceptHierarchy();
 }
@@ -400,4 +403,67 @@ string CognitiveTemplate::substituteWithKnowledge(const string& template_str, co
     }
     
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// NSVD: Context-State Vector implementation
+// ---------------------------------------------------------------------------
+
+void OpenCogAIMLIntegration::updateContextVector(const string& text,
+                                                   double weight) {
+    auto concepts = extractConcepts(text);
+    for (const auto& c : concepts) {
+        auto it = m_contextVector.find(c);
+        if (it != m_contextVector.end())
+            it->second = min(1.0, it->second + weight);
+        else
+            m_contextVector[c] = min(1.0, weight);
+    }
+}
+
+void OpenCogAIMLIntegration::decayContextVector() {
+    for (auto& kv : m_contextVector)
+        kv.second *= m_contextDecayFactor;
+
+    // Prune very low salience entries to keep the map compact.
+    for (auto it = m_contextVector.begin(); it != m_contextVector.end(); ) {
+        if (it->second < 0.01)
+            it = m_contextVector.erase(it);
+        else
+            ++it;
+    }
+}
+
+double OpenCogAIMLIntegration::getContextSalienceBoost(
+    const string& pattern) const
+{
+    if (m_contextVector.empty()) return 0.0;
+    regex wordRe(R"(\b[a-zA-Z]{3,}\b)");
+    sregex_iterator begin(pattern.begin(), pattern.end(), wordRe);
+    sregex_iterator end;
+    double boost = 0.0;
+    int cnt = 0;
+    for (auto it = begin; it != end; ++it) {
+        string w = it->str();
+        transform(w.begin(), w.end(), w.begin(), ::tolower);
+        auto jt = m_contextVector.find(w);
+        if (jt != m_contextVector.end()) {
+            boost += jt->second;
+            cnt++;
+        }
+    }
+    return (cnt > 0) ? min(1.0, boost / cnt) : 0.0;
+}
+
+vector<pair<string, double>> OpenCogAIMLIntegration::getTopConcepts(int n) const {
+    vector<pair<string, double>> sorted(m_contextVector.begin(),
+                                        m_contextVector.end());
+    sort(sorted.begin(), sorted.end(),
+         [](const pair<string, double>& a,
+            const pair<string, double>& b) {
+             return a.second > b.second;
+         });
+    if (n > 0 && (int)sorted.size() > n)
+        sorted.resize(n);
+    return sorted;
 }

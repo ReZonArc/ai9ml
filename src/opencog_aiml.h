@@ -38,6 +38,18 @@ namespace opencog_aiml {
         // Context and memory
         void updateContext(const string& input, const string& response);
         string getContextualResponse(const string& input);
+
+        // --- NSVD: Context-State Vector ---
+        // Update the salience map from the tokens in text.
+        void updateContextVector(const string& text, double weight = 1.0);
+        // Exponential decay applied once per conversation turn.
+        void decayContextVector();
+        // Direct access for the PatternLattice / ConstraintEngine.
+        const map<string, double>& getContextVector() const { return m_contextVector; }
+        // Salience boost for patterns whose tokens appear in the context vector.
+        double getContextSalienceBoost(const string& pattern) const;
+        // Top-N most salient concepts (for GPT-4o constraint prompt).
+        vector<pair<string, double>> getTopConcepts(int n = 5) const;
         
         // Concept understanding
         vector<string> extractConcepts(const string& input);
@@ -50,6 +62,10 @@ namespace opencog_aiml {
         AtomSpace& m_atomSpace;
         vector<string> m_conversationHistory;
         string m_currentTopic;
+
+        // NSVD: Context-State Vector (concept → salience, decays per turn).
+        map<string, double> m_contextVector;
+        double m_contextDecayFactor;
         
         // Helper methods
         void createConceptsFromPattern(const string& pattern);

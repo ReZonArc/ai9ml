@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <future>
 
 using namespace std;
 
@@ -16,10 +17,27 @@ namespace chatgpt4o {
     class ChatGPT4oIntegration;
 }
 
+namespace pattern_lattice {
+    class PatternLattice;
+}
+
+namespace constraint_engine {
+    class ConstraintEngine;
+    struct ResponseConstraints;
+}
+
+namespace diffusion_engine {
+    class DiffusionEngine;
+}
+
+namespace aiml {
+    class LearnableCategoryList;
+}
+
 class Chatmachine {
 public:
     Chatmachine (string str);
-    ~Chatmachine();  // Add destructor
+    ~Chatmachine();
 
     void listen();
     void respond();
@@ -35,6 +53,13 @@ public:
     void setChatGPT4oMode(bool enabled) { m_bChatGPT4oEnabled = enabled; }
     void setChatGPT4oApiKey(const string& apiKey);
     void showChatGPT4oConfig();
+
+    // NSVD pipeline control
+    void setNSVDMode(bool enabled)        { m_bNSVDEnabled   = enabled; }
+    void setNSVDLearning(bool enabled)    { m_bNSVDLearning  = enabled; }
+    void setNSVDConstrained(bool enabled) { m_bNSVDConstrained = enabled; }
+    void initializeNSVD();
+    void showNSVDStats();
     
     // Public access to input for main loop
     string m_sInput;
@@ -47,6 +72,23 @@ private:
     void setResponse(string sResponse);
     void prepare_response(string &resp);
     void shuffle();
+
+    // NSVD parallel pipeline — returns the best candidate response string.
+    string nsvd_respond();
+
+    // Symbolic path: PatternLattice lookup with context-aware scoring.
+    // Returns {response, score, confidence}.
+    struct SymbolicResult { string text; double score; double confidence; };
+    SymbolicResult symbolicPath(const string& input);
+
+    // Sub-symbolic path: AtomSpace + optional GPT-4o.
+    SymbolicResult subSymbolicPath(const string& input);
+
+    // Synthesise a learnable category if the GPT-4o response is novel enough.
+    void maybeSynthesizeCategory(const string& input, const string& response);
+
+    // Consolidate and decay at end of turn.
+    void updateNSVDState(const string& input, const string& response);
 
 private:
     string m_sChatBotName;
@@ -68,6 +110,17 @@ private:
     unique_ptr<chatgpt4o::ChatGPT4oIntegration> m_pChatGPT4oIntegration;
     bool m_bChatGPT4oEnabled;
     vector<string> m_conversationHistory;
+
+    // NSVD pipeline
+    bool m_bNSVDEnabled;
+    bool m_bNSVDLearning;
+    bool m_bNSVDConstrained;
+    unique_ptr<pattern_lattice::PatternLattice>      m_pPatternLattice;
+    unique_ptr<constraint_engine::ConstraintEngine>  m_pConstraintEngine;
+    unique_ptr<diffusion_engine::DiffusionEngine>    m_pDiffusionEngine;
+    unique_ptr<aiml::LearnableCategoryList>          m_pLearnableCategoryList;
+    vector<string> m_recentResponses;   // rolling window for anti-repetition
+    int            m_turnCount;
 };
 
 #endif
