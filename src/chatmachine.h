@@ -30,6 +30,18 @@ namespace diffusion_engine {
     class DiffusionEngine;
 }
 
+namespace mlp_engine {
+    class MLPEngine;
+}
+
+namespace hgnn {
+    class HyperGraphNeuralNet;
+}
+
+namespace dtesnn {
+    class DeepTreeEchoStateNet;
+}
+
 namespace aiml {
     class LearnableCategoryList;
 }
@@ -58,6 +70,7 @@ public:
     void setNSVDMode(bool enabled)        { m_bNSVDEnabled   = enabled; }
     void setNSVDLearning(bool enabled)    { m_bNSVDLearning  = enabled; }
     void setNSVDConstrained(bool enabled) { m_bNSVDConstrained = enabled; }
+    void setNSVDNeural(bool enabled)      { m_bNSVDNeural    = enabled; }
     void initializeNSVD();
     void showNSVDStats();
     
@@ -84,11 +97,18 @@ private:
     // Sub-symbolic path: AtomSpace + optional GPT-4o.
     SymbolicResult subSymbolicPath(const string& input);
 
+    // HGNN async path: spatially-scored PatternLattice result.
+    SymbolicResult hgnnPath(const string& input);
+
+    // DTESNN async path: temporally-scored result.
+    SymbolicResult dtesnnPath(const string& input);
+
     // Synthesise a learnable category if the GPT-4o response is novel enough.
     void maybeSynthesizeCategory(const string& input, const string& response);
 
-    // Consolidate and decay at end of turn.
-    void updateNSVDState(const string& input, const string& response);
+    // Consolidate and decay at end of turn.  winningPath = mlp_engine PATH_* index.
+    void updateNSVDState(const string& input, const string& response,
+                         int winningPath = -1);
 
 private:
     string m_sChatBotName;
@@ -115,12 +135,20 @@ private:
     bool m_bNSVDEnabled;
     bool m_bNSVDLearning;
     bool m_bNSVDConstrained;
+    bool m_bNSVDNeural;                                              // HGNN+DTESNN+MLP
     unique_ptr<pattern_lattice::PatternLattice>      m_pPatternLattice;
     unique_ptr<constraint_engine::ConstraintEngine>  m_pConstraintEngine;
     unique_ptr<diffusion_engine::DiffusionEngine>    m_pDiffusionEngine;
     unique_ptr<aiml::LearnableCategoryList>          m_pLearnableCategoryList;
+
+    // Neural complement modules (activated by m_bNSVDNeural).
+    unique_ptr<hgnn::HyperGraphNeuralNet>            m_pHGNN;
+    unique_ptr<dtesnn::DeepTreeEchoStateNet>         m_pDTESNN;
+    unique_ptr<mlp_engine::MLPEngine>                m_pMLP;
+
     vector<string> m_recentResponses;   // rolling window for anti-repetition
     int            m_turnCount;
+    int            m_lastOuterLoopCount; // tracks outer-loop completion for lr decay
 };
 
 #endif

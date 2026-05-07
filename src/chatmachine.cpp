@@ -12,8 +12,13 @@
 #include "pattern_lattice.h"
 #include "constraint_engine.h"
 #include "diffusion_engine.h"
+#include "mlp_engine.h"
+#include "hgnn.h"
+#include "dtesnn.h"
 #include <iostream>
+#include <sstream>
 #include <cstdlib>
+#include <cctype>
 #include <time.h>
 #include <string>
 #include <vector>
@@ -177,6 +182,16 @@ int main(int argc, char* argv[])
             cm.setNSVDLearning(true);
             cm.setNSVDConstrained(true);
             cout << "NSVD-Constrained mode enabled (strict topicality + constraint optimisation)!" << endl;
+        } else if (string(argv[1]) == "nsvd-neural") {
+            strategy = "basic";
+            dataDir = "database/Basic/";
+            cm.setOpenCogMode(true);
+            cm.setChatGPT4oMode(true);
+            cm.setNSVDMode(true);
+            cm.setNSVDLearning(true);
+            cm.setNSVDConstrained(true);
+            cm.setNSVDNeural(true);
+            cout << "NSVD-Neural mode enabled (HGNN spatial + DTESNN temporal + emergent MLP)!" << endl;
         } else {
             strategy = "alice";
             dataDir = "database/Alice/";
@@ -231,9 +246,11 @@ Chatmachine::Chatmachine(string str)
       m_bOpenCogEnabled(true), m_pOpenCogIntegration(nullptr),  // Keep original default (enabled)
       m_bChatGPT4oEnabled(false), m_pChatGPT4oIntegration(nullptr),
       m_bNSVDEnabled(false), m_bNSVDLearning(false), m_bNSVDConstrained(false),
+      m_bNSVDNeural(false),
       m_pPatternLattice(nullptr), m_pConstraintEngine(nullptr),
       m_pDiffusionEngine(nullptr), m_pLearnableCategoryList(nullptr),
-      m_turnCount(0)
+      m_pHGNN(nullptr), m_pDTESNN(nullptr), m_pMLP(nullptr),
+      m_turnCount(0), m_lastOuterLoopCount(0)
 {
     init_random();
     // OpenCog, ChatGPT-4o, and NSVD initialization will happen after categories are loaded
@@ -585,6 +602,29 @@ void Chatmachine::initializeNSVD() {
         m_pLearnableCategoryList.reset(new aiml::LearnableCategoryList());
         cout << "LearnableCategoryList initialised (online synthesis enabled)." << endl;
     }
+
+    // Neural complement modules (HGNN + DTESNN + MLP).
+    if (m_bNSVDNeural) {
+        // HGNN — spatially-aware message-passing on the AtomSpace.
+        m_pHGNN.reset(new hgnn::HyperGraphNeuralNet(
+            opencog::AtomSpaceManager::getInstance()));
+        // Run an initial forward pass to populate embeddings.
+        m_pHGNN->forwardPass();
+        cout << "HGNN initialised: " << m_pHGNN->size()
+             << " concept embeddings." << endl;
+
+        // DTESNN — temporally-aware deep-tree echo state network.
+        m_pDTESNN.reset(new dtesnn::DeepTreeEchoStateNet());
+        cout << "DTESNN initialised (tree depth="
+             << dtesnn::DTESNN_TREE_DEPTH << ", reservoir="
+             << dtesnn::DTESNN_RESERVOIR << " per level)." << endl;
+
+        // Emergent MLP — fuses HGNN + DTESNN features.
+        m_pMLP.reset(new mlp_engine::MLPEngine());
+        cout << "MLPEngine initialised (input="
+             << mlp_engine::MLP_INPUT_DIM << ", output="
+             << mlp_engine::MLP_OUTPUT_DIM << ")." << endl;
+    }
 }
 
 void Chatmachine::showNSVDStats() {
@@ -592,6 +632,7 @@ void Chatmachine::showNSVDStats() {
     cout << "NSVD enabled:     " << (m_bNSVDEnabled     ? "Yes" : "No") << endl;
     cout << "NSVD learning:    " << (m_bNSVDLearning    ? "Yes" : "No") << endl;
     cout << "NSVD constrained: " << (m_bNSVDConstrained ? "Yes" : "No") << endl;
+    cout << "NSVD neural:      " << (m_bNSVDNeural      ? "Yes" : "No") << endl;
     cout << "Turn count:       " << m_turnCount << endl;
     if (m_pPatternLattice) {
         cout << "PatternLattice:   " << m_pPatternLattice->size()
@@ -600,6 +641,16 @@ void Chatmachine::showNSVDStats() {
     if (m_pLearnableCategoryList) {
         cout << "Learned cats:     "
              << m_pLearnableCategoryList->size() << endl;
+    }
+    if (m_pHGNN) {
+        cout << "HGNN embeddings:  " << m_pHGNN->size() << endl;
+    }
+    if (m_pDTESNN) {
+        cout << "DTESNN steps:     " << m_pDTESNN->getStepCount() << endl;
+    }
+    if (m_pMLP) {
+        cout << "MLP updates:      " << m_pMLP->getUpdateCount()
+             << "  lr=" << m_pMLP->getLearningRate() << endl;
     }
     if (m_pDiffusionEngine) {
         m_pDiffusionEngine->printDiffusionStats();
@@ -613,6 +664,7 @@ void Chatmachine::showNSVDStats() {
 
 string Chatmachine::nsvd_respond() {
     using namespace constraint_engine;
+    using namespace mlp_engine;
 
     // 1. Choose constraint profile.
     ResponseConstraints constraints = m_bNSVDConstrained
@@ -624,41 +676,70 @@ string Chatmachine::nsvd_respond() {
     if (m_pOpenCogIntegration)
         contextVector = m_pOpenCogIntegration->getContextVector();
 
+    // Capture input by value for lambdas (thread safety).
+    string inputCopy = m_sInput;
+
     // 3. Launch symbolic path asynchronously.
     auto symbFuture = std::async(std::launch::async,
-        [this]() -> SymbolicResult {
-            return symbolicPath(m_sInput);
+        [this, inputCopy]() -> SymbolicResult {
+            return symbolicPath(inputCopy);
         });
 
-    // 4. Sub-symbolic path runs in parallel only if symbolic confidence is
-    //    likely to be low (determined after both finish; launched eagerly to
-    //    hide latency).
+    // 4. Sub-symbolic path (parallel).
     auto subSymFuture = std::async(std::launch::async,
-        [this]() -> SymbolicResult {
-            return subSymbolicPath(m_sInput);
+        [this, inputCopy]() -> SymbolicResult {
+            return subSymbolicPath(inputCopy);
         });
 
-    // 5. Collect results within a time budget.
-    SymbolicResult symbResult   = {"", 0.0, 0.0};
-    SymbolicResult subSymResult = {"", 0.0, 0.0};
-
-    try {
-        symbResult = symbFuture.get();
-    } catch (const exception& e) {
-        cerr << "[NSVD] Symbolic path error: " << e.what() << endl;
-    } catch (...) {
-        cerr << "[NSVD] Symbolic path: unknown error" << endl;
+    // 5. HGNN spatial path (parallel, only when neural mode is active).
+    std::future<SymbolicResult> hgnnFuture;
+    bool hgnnLaunched = false;
+    if (m_bNSVDNeural && m_pHGNN) {
+        hgnnFuture = std::async(std::launch::async,
+            [this, inputCopy]() -> SymbolicResult {
+                return hgnnPath(inputCopy);
+            });
+        hgnnLaunched = true;
     }
 
-    try {
-        subSymResult = subSymFuture.get();
-    } catch (const exception& e) {
-        cerr << "[NSVD] Sub-symbolic path error: " << e.what() << endl;
-    } catch (...) {
-        cerr << "[NSVD] Sub-symbolic path: unknown error" << endl;
+    // 6. DTESNN temporal path (parallel, only when neural mode is active).
+    std::future<SymbolicResult> dtesnnFuture;
+    bool dtesnnLaunched = false;
+    if (m_bNSVDNeural && m_pDTESNN) {
+        dtesnnFuture = std::async(std::launch::async,
+            [this, inputCopy, contextVector]() -> SymbolicResult {
+                return dtesnnPath(inputCopy);
+            });
+        dtesnnLaunched = true;
     }
 
-    // 6. Build candidate list.
+    // 7. Collect results.
+    SymbolicResult symbResult    = {"", 0.0, 0.0};
+    SymbolicResult subSymResult  = {"", 0.0, 0.0};
+    SymbolicResult hgnnResult    = {"", 0.0, 0.0};
+    SymbolicResult dtesnnResult  = {"", 0.0, 0.0};
+
+    try { symbResult   = symbFuture.get();   }
+    catch (const exception& e) { cerr << "[NSVD] Symbolic path error: "    << e.what() << endl; }
+    catch (...) { cerr << "[NSVD] Symbolic path: unknown error" << endl; }
+
+    try { subSymResult = subSymFuture.get(); }
+    catch (const exception& e) { cerr << "[NSVD] SubSymbolic path error: " << e.what() << endl; }
+    catch (...) { cerr << "[NSVD] Sub-symbolic path: unknown error" << endl; }
+
+    if (hgnnLaunched) {
+        try { hgnnResult = hgnnFuture.get(); }
+        catch (const exception& e) { cerr << "[NSVD] HGNN path error: "   << e.what() << endl; }
+        catch (...) { cerr << "[NSVD] HGNN path: unknown error" << endl; }
+    }
+
+    if (dtesnnLaunched) {
+        try { dtesnnResult = dtesnnFuture.get(); }
+        catch (const exception& e) { cerr << "[NSVD] DTESNN path error: " << e.what() << endl; }
+        catch (...) { cerr << "[NSVD] DTESNN path: unknown error" << endl; }
+    }
+
+    // 8. Build candidate list.
     vector<ResponseCandidate> candidates;
     if (!symbResult.text.empty())
         candidates.emplace_back(symbResult.text, symbResult.score,
@@ -666,19 +747,26 @@ string Chatmachine::nsvd_respond() {
     if (!subSymResult.text.empty() && subSymResult.text != symbResult.text)
         candidates.emplace_back(subSymResult.text, subSymResult.score,
                                  "opencog", subSymResult.confidence);
+    if (!hgnnResult.text.empty() && hgnnResult.text != symbResult.text &&
+        hgnnResult.text != subSymResult.text)
+        candidates.emplace_back(hgnnResult.text, hgnnResult.score,
+                                 "hgnn", hgnnResult.confidence);
+    if (!dtesnnResult.text.empty() && dtesnnResult.text != symbResult.text &&
+        dtesnnResult.text != subSymResult.text)
+        candidates.emplace_back(dtesnnResult.text, dtesnnResult.score,
+                                 "dtesnn", dtesnnResult.confidence);
 
-    // Also offer learned categories as candidates if available.
+    // Add learned categories.
     if (m_pLearnableCategoryList && m_pPatternLattice) {
         auto scored = m_pPatternLattice->findBestCategories(
-            m_sInput, contextVector, 3);
+            inputCopy, contextVector, 3);
         for (const auto& sc : scored) {
             if (sc.category && sc.category->getTruthValue().immutable == false &&
                 sc.category->templ() && sc.score > 0.1)
             {
                 candidates.emplace_back(
                     sc.category->templ()->toString(),
-                    sc.score,
-                    "learned",
+                    sc.score, "learned",
                     sc.category->getTruthValue().confidence);
             }
         }
@@ -687,13 +775,62 @@ string Chatmachine::nsvd_respond() {
     if (candidates.empty())
         return "";
 
-    // 7. Apply constraint engine.
+    // 9. MLP blend weighting (neural mode only).
+    //    Reweight candidate base-scores by the MLP's blend weights.
+    int winningPath = -1;
+    if (m_bNSVDNeural && m_pMLP && m_pHGNN && m_pDTESNN) {
+        // Derive HGNN/DTESNN feature vectors for the MLP input.
+        auto inputTokens = [](const string& s) {
+            vector<string> toks;
+            istringstream iss(s);
+            string tok;
+            while (iss >> tok) {
+                string lower;
+                for (char c : tok) if (isalpha((unsigned char)c)) lower += tolower((unsigned char)c);
+                if (!lower.empty()) toks.push_back(lower);
+            }
+            return toks;
+        };
+        auto hgnnFeats   = m_pHGNN->aggregateEmbeddings(inputTokens(inputCopy));
+        auto dtesnnFeats = m_pDTESNN->getReadout();
+
+        auto feat = MLPEngine::encodeFeatures(
+            symbResult.score,   subSymResult.score,
+            hgnnResult.score,   dtesnnResult.score,
+            hgnnFeats, dtesnnFeats);
+
+        auto blendWeights = m_pMLP->forward(feat);
+
+        // Scale each candidate's base score by its MLP blend weight.
+        // The formula (0.5 + 0.5 * w * MLP_OUTPUT_DIM) maps a uniform weight
+        // of 1/MLP_OUTPUT_DIM back to 1.0 (neutral), while a dominant weight
+        // of 1.0 doubles the score and a weight of 0.0 halves it.
+        for (auto& cand : candidates) {
+            double w = 1.0;
+            if      (cand.source == "aiml"    || cand.source == "learned") w = blendWeights[PATH_SYMBOLIC];
+            else if (cand.source == "opencog")                              w = blendWeights[PATH_SUBSYMBOLIC];
+            else if (cand.source == "hgnn")                                 w = blendWeights[PATH_HGNN];
+            else if (cand.source == "dtesnn")                               w = blendWeights[PATH_DTESNN];
+            cand.baseScore  = cand.baseScore  * (0.5 + 0.5 * w * (double)MLP_OUTPUT_DIM);
+            cand.finalScore = cand.baseScore;
+        }
+    }
+
+    // 10. Apply constraint engine.
     ResponseCandidate best = m_pConstraintEngine->selectBestCandidate(
         candidates, constraints, contextVector, m_recentResponses);
 
+    // Determine winning path index for MLP update.
+    if (!best.text.empty()) {
+        if      (best.source == "aiml"    || best.source == "learned") winningPath = PATH_SYMBOLIC;
+        else if (best.source == "opencog")                              winningPath = PATH_SUBSYMBOLIC;
+        else if (best.source == "hgnn")                                 winningPath = PATH_HGNN;
+        else if (best.source == "dtesnn")                               winningPath = PATH_DTESNN;
+    }
+
     string response = best.text;
 
-    // 8. If still empty and GPT-4o is available, try constrained generation.
+    // 11. GPT-4o fallback if still empty.
     if (response.empty() && m_bChatGPT4oEnabled && m_pChatGPT4oIntegration &&
         m_pChatGPT4oIntegration->isConfigured())
     {
@@ -701,18 +838,18 @@ string Chatmachine::nsvd_respond() {
         string constraintPrompt = m_pConstraintEngine->buildGPT4oConstraintPrompt(
             constraints, contextVector, m_recentResponses);
         string gptResp = m_pChatGPT4oIntegration->generateConstrainedResponse(
-            m_sInput, m_conversationHistory, constraintPrompt);
+            inputCopy, m_conversationHistory, constraintPrompt);
         if (!gptResp.empty()) {
             response = "[GPT-4o] " + gptResp;
             best = ResponseCandidate(response, 0.6, "gpt4o", 1.0);
         }
     }
 
-    // 9. Post-response updates.
+    // 12. Post-response updates.
     if (!response.empty()) {
-        updateNSVDState(m_sInput, response);
+        updateNSVDState(inputCopy, response, winningPath);
         if (m_bNSVDLearning && best.source == "gpt4o")
-            maybeSynthesizeCategory(m_sInput, response);
+            maybeSynthesizeCategory(inputCopy, response);
     }
 
     return response;
@@ -805,8 +942,93 @@ void Chatmachine::maybeSynthesizeCategory(const string& input,
         m_pPatternLattice->addLearnedCategory(cat);
 }
 
+// ---------------------------------------------------------------------------
+// HGNN spatial path
+// ---------------------------------------------------------------------------
+
+Chatmachine::SymbolicResult Chatmachine::hgnnPath(const string& input)
+{
+    SymbolicResult result = {"", 0.0, 0.0};
+    if (!m_pHGNN || !m_pPatternLattice) return result;
+
+    // Extract input concepts (tokenise input into lowercase words).
+    vector<string> inputTokens;
+    {
+        istringstream iss(input);
+        string tok;
+        while (iss >> tok) {
+            string lower;
+            for (char c : tok)
+                if (isalpha((unsigned char)c)) lower += tolower((unsigned char)c);
+            if (!lower.empty()) inputTokens.push_back(lower);
+        }
+    }
+
+    // Use the cached (read-only) HGNN embeddings to score PatternLattice candidates.
+    map<string, double> contextVector;
+    if (m_pOpenCogIntegration)
+        contextVector = m_pOpenCogIntegration->getContextVector();
+
+    auto candidates = m_pPatternLattice->findBestCategories(input, contextVector, 5);
+    double bestScore = -1.0;
+
+    for (const auto& sc : candidates) {
+        if (!sc.category || !sc.category->templ()) continue;
+        string text = sc.category->templ()->toString();
+        if (text.empty()) continue;
+
+        double spatialScore = m_pHGNN->scoreResponse(text, inputTokens);
+        double combined     = 0.5 * sc.score + 0.5 * spatialScore;
+
+        if (combined > bestScore) {
+            bestScore         = combined;
+            result.text       = text;
+            result.score      = combined;
+            result.confidence = sc.category->getTruthValue().confidence;
+        }
+    }
+
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// DTESNN temporal path
+// ---------------------------------------------------------------------------
+
+Chatmachine::SymbolicResult Chatmachine::dtesnnPath(const string& input)
+{
+    SymbolicResult result = {"", 0.0, 0.0};
+    if (!m_pDTESNN || !m_pPatternLattice) return result;
+
+    map<string, double> contextVector;
+    if (m_pOpenCogIntegration)
+        contextVector = m_pOpenCogIntegration->getContextVector();
+
+    auto candidates = m_pPatternLattice->findBestCategories(input, contextVector, 5);
+    double bestScore = -1.0;
+
+    for (const auto& sc : candidates) {
+        if (!sc.category || !sc.category->templ()) continue;
+        string text = sc.category->templ()->toString();
+        if (text.empty()) continue;
+
+        double temporalScore = m_pDTESNN->scoreResponse(text, contextVector);
+        double combined      = 0.5 * sc.score + 0.5 * temporalScore;
+
+        if (combined > bestScore) {
+            bestScore         = combined;
+            result.text       = text;
+            result.score      = combined;
+            result.confidence = sc.category->getTruthValue().confidence;
+        }
+    }
+
+    return result;
+}
+
 void Chatmachine::updateNSVDState(const string& input,
-                                   const string& response) {
+                                   const string& response,
+                                   int winningPath) {
     m_turnCount++;
 
     // Update context vector in OpenCog layer.
@@ -823,7 +1045,61 @@ void Chatmachine::updateNSVDState(const string& input,
         auto sentNode = atomSpace.addSentenceNode(input);
         if (sentNode)
             m_pDiffusionEngine->propagateTrustFromAtom(sentNode, 0.2, 3);
-        m_pDiffusionEngine->decayTemperature(0.97);
+        // Nested inner-loop step (handles its own temperature decay, and
+        // triggers middle / outer loop callbacks at the configured thresholds).
+        m_pDiffusionEngine->innerLoopStep();
+    }
+
+    // --- Neural module updates (inner-loop work) ---
+
+    // DTESNN: advance reservoir state with current context.
+    if (m_bNSVDNeural && m_pDTESNN && m_pOpenCogIntegration) {
+        auto inputFeats = dtesnn::DeepTreeEchoStateNet::encodeContextVector(
+            m_pOpenCogIntegration->getContextVector());
+        m_pDTESNN->step(inputFeats);
+    }
+
+    // MLP: backprop toward the winning path (if known).
+    if (m_bNSVDNeural && m_pMLP && m_pHGNN && m_pDTESNN &&
+        winningPath >= 0 && winningPath < mlp_engine::MLP_OUTPUT_DIM)
+    {
+        auto hgnnFeats   = m_pHGNN->aggregateEmbeddings(
+            [&]() {
+                vector<string> toks;
+                istringstream iss(input);
+                string tok;
+                while (iss >> tok) {
+                    string lower;
+                    for (char c : tok)
+                        if (isalpha((unsigned char)c)) lower += tolower((unsigned char)c);
+                    if (!lower.empty()) toks.push_back(lower);
+                }
+                return toks;
+            }());
+        auto dtesnnFeats = m_pDTESNN->getReadout();
+
+        auto feat = mlp_engine::MLPEngine::encodeFeatures(
+            0.5, 0.5, 0.5, 0.5,   // placeholder scores for backward pass
+            hgnnFeats, dtesnnFeats);
+        m_pMLP->backward(feat, winningPath, m_pMLP->getLearningRate());
+    }
+
+    // Middle-loop: HGNN forward pass (re-run message passing).
+    if (m_bNSVDNeural && m_pHGNN && m_pDiffusionEngine) {
+        int inner     = m_pDiffusionEngine->getInnerLoopCount();
+        int threshold = m_pDiffusionEngine->getInnerThreshold();
+        if (inner > 0 && inner % threshold == 0) {
+            m_pHGNN->forwardPass();
+        }
+    }
+
+    // Outer-loop: MLP learning rate decay once per outer-loop completion.
+    if (m_bNSVDNeural && m_pMLP && m_pDiffusionEngine) {
+        int outerNow = m_pDiffusionEngine->getOuterLoopCount();
+        if (outerNow > m_lastOuterLoopCount) {
+            m_pMLP->decayLearningRate(0.95);
+            m_lastOuterLoopCount = outerNow;
+        }
     }
 
     // Decay learned categories.
@@ -849,6 +1125,8 @@ void Chatmachine::updateNSVDState(const string& input,
     }
 
     // Periodic consolidation (every 20 turns when learning is enabled).
+    // Superseded by DiffusionEngine outer-loop for pure consolidation, but
+    // kept here so legacy non-neural modes still work.
     if (m_bNSVDLearning && m_pDiffusionEngine &&
         m_pLearnableCategoryList && m_turnCount % 20 == 0)
     {
