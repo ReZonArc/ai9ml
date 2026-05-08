@@ -1,4 +1,5 @@
 #include "diffusion_engine.h"
+#include "workflow_engine.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -144,6 +145,45 @@ int DiffusionEngine::consolidateLearnedCategories(
     cout << "[DiffusionEngine] Consolidated " << exported
          << " learned categories -> " << filename << endl;
     return exported;
+}
+
+int DiffusionEngine::consolidateWorkflowCategories(
+    workflow_engine::WorkflowEngine* engine,
+    const string& outputDir,
+    double threshold)
+{
+    if (!engine) return 0;
+
+    auto candidates = engine->collectConsolidatedMetaPatterns(threshold);
+    if (candidates.empty()) return 0;
+
+    mkdir(outputDir.c_str(), 0755);
+    string filename = outputDir + "/workflow_" +
+                      to_string((long long)time(nullptr)) + "_" +
+                      to_string(m_consolidationCounter++) + ".aiml";
+
+    ofstream out(filename.c_str());
+    if (!out.is_open()) {
+        cerr << "[DiffusionEngine] Cannot write workflow consolidation to "
+             << filename << endl;
+        return 0;
+    }
+
+    out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        << "<aiml version=\"1.0\">\n";
+
+    for (const auto& p : candidates) {
+        out << "  <topic name=\"" << logic_meta_patterns::toString(p.system) << "\">\n";
+        out << formatAIMLCategory(p.pattern, p.template_action);
+        out << "  </topic>\n";
+    }
+
+    out << "</aiml>\n";
+    out.close();
+
+    cout << "[DiffusionEngine] Consolidated " << candidates.size()
+         << " workflow categories -> " << filename << endl;
+    return (int)candidates.size();
 }
 
 // --- Diagnostics ---

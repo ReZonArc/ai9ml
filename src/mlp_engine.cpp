@@ -106,25 +106,27 @@ void MLPEngine::backward(const vector<double>& input, int targetIndex,
 vector<double> MLPEngine::encodeFeatures(
     double symbolicScore,    double subSymbolicScore,
     double hgnnScore,        double dtesnnScore,
+    double workflowScore,
     const vector<double>& hgnnFeatures,
     const vector<double>& dtesnnFeatures)
 {
     vector<double> feat(MLP_INPUT_DIM, 0.0);
 
-    // [0..3] — path scores clamped to [0,1].
+    // [0..4] — path scores clamped to [0,1].
     auto clamp01 = [](double v) { return max(0.0, min(1.0, v)); };
     feat[PATH_SYMBOLIC]    = clamp01(symbolicScore);
     feat[PATH_SUBSYMBOLIC] = clamp01(subSymbolicScore);
     feat[PATH_HGNN]        = clamp01(hgnnScore);
     feat[PATH_DTESNN]      = clamp01(dtesnnScore);
+    feat[PATH_WORKFLOW]    = clamp01(workflowScore);
 
-    // [4..11] — HGNN 8-D features (zero-pad / truncate).
+    // [5..12] — HGNN 8-D features (zero-pad / truncate).
     for (int i = 0; i < 8; ++i)
-        feat[4 + i] = (i < (int)hgnnFeatures.size()) ? hgnnFeatures[i] : 0.0;
+        feat[5 + i] = (i < (int)hgnnFeatures.size()) ? hgnnFeatures[i] : 0.0;
 
-    // [12..19] — DTESNN 8-D features.
+    // [13..20] — DTESNN 8-D features.
     for (int i = 0; i < 8; ++i)
-        feat[12 + i] = (i < (int)dtesnnFeatures.size()) ? dtesnnFeatures[i] : 0.0;
+        feat[13 + i] = (i < (int)dtesnnFeatures.size()) ? dtesnnFeatures[i] : 0.0;
 
     return feat;
 }

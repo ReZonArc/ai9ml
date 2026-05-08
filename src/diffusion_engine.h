@@ -33,6 +33,10 @@ using namespace std;
 using namespace opencog;
 using namespace aiml;
 
+namespace workflow_engine {
+    class WorkflowEngine;
+}
+
 namespace diffusion_engine {
 
     class DiffusionEngine {
@@ -71,6 +75,11 @@ namespace diffusion_engine {
         int consolidateLearnedCategories(LearnableCategoryList* learnedCL,
                                          const string& outputDir,
                                          double threshold = 0.7);
+
+        // Write high-confidence workflow meta-patterns as AIML XML into outputDir.
+        int consolidateWorkflowCategories(workflow_engine::WorkflowEngine* engine,
+                                          const string& outputDir,
+                                          double threshold = 0.7);
 
         // Print diffusion diagnostics.
         void printDiffusionStats() const;

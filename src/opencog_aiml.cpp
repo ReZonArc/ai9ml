@@ -1,5 +1,6 @@
 #include "opencog_aiml.h"
 #include "atomspace.h"
+#include "math_primitives.h"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -22,7 +23,9 @@ OpenCogAIMLIntegration::~OpenCogAIMLIntegration() {
 }
 
 void OpenCogAIMLIntegration::initializeFromCategories(const vector<Category*>& categories) {
-    cout << "Initializing OpenCog from " << categories.size() << " AIML categories..." << endl;
+    auto primitiveCats = math_primitives::MathPrimitiveRegistry::getInstance().generateCategories();
+    size_t total = categories.size() + primitiveCats.size();
+    cout << "Initializing OpenCog from " << total << " AIML categories..." << endl;
     
     for (const auto& category : categories) {
         if (category) {
@@ -34,6 +37,17 @@ void OpenCogAIMLIntegration::initializeFromCategories(const vector<Category*>& c
                 m_atomSpace.learnFromAIMLCategory(pattern, template_str);
                 
                 // Create concept relationships
+                establishRelationships(pattern, template_str);
+            }
+        }
+    }
+
+    for (const auto& category : primitiveCats) {
+        if (category) {
+            string pattern = category->pattern() ? category->pattern()->toString() : "";
+            string template_str = category->templ() ? category->templ()->toString() : "";
+            if (!pattern.empty() && !template_str.empty()) {
+                m_atomSpace.learnFromAIMLCategory(pattern, template_str);
                 establishRelationships(pattern, template_str);
             }
         }
