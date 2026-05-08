@@ -1,5 +1,5 @@
-#ifndef __LOGIC_CLASSIFIER_H__
-#define __LOGIC_CLASSIFIER_H__
+#ifndef LOGIC_CLASSIFIER_H_
+#define LOGIC_CLASSIFIER_H_
 
 #include "logic_meta_patterns.h"
 #include "hgnn.h"
@@ -8,14 +8,12 @@
 #include <vector>
 #include <map>
 
-using namespace std;
-
 namespace logic_classifier {
 
     struct Classification {
         logic_meta_patterns::LogicSystem system;
         double confidence;
-        vector<double> probabilities;
+        std::vector<double> probabilities;
         bool isLogic;
 
         Classification()
@@ -27,17 +25,17 @@ namespace logic_classifier {
         LogicClassifier();
         ~LogicClassifier() = default;
 
-        Classification classify(const string& input,
-                                const map<string, double>& contextVector,
+        Classification classify(const std::string& input,
+                                const std::map<std::string, double>& contextVector,
                                 hgnn::HyperGraphNeuralNet* hgnnNet,
                                 dtesnn::DeepTreeEchoStateNet* dtesnnNet);
 
-        bool parseOverride(const string& input,
+        bool parseOverride(const std::string& input,
                            logic_meta_patterns::LogicSystem& system,
-                           string& remainingInput) const;
+                           std::string& remainingInput) const;
 
-        void reinforce(const string& input,
-                       const map<string, double>& contextVector,
+        void reinforce(const std::string& input,
+                       const std::map<std::string, double>& contextVector,
                        hgnn::HyperGraphNeuralNet* hgnnNet,
                        dtesnn::DeepTreeEchoStateNet* dtesnnNet,
                        logic_meta_patterns::LogicSystem target,
@@ -51,35 +49,35 @@ namespace logic_classifier {
         static const int HIDDEN_DIM = 16;
         static const int OUTPUT_DIM = 7; // NONE + 6 systems
 
-        vector<vector<double>> m_W1;
-        vector<double> m_b1;
-        vector<vector<double>> m_W2;
-        vector<double> m_b2;
+        std::vector<std::vector<double>> m_W1;
+        std::vector<double> m_b1;
+        std::vector<std::vector<double>> m_W2;
+        std::vector<double> m_b2;
 
-        vector<double> m_lastInput;
-        vector<double> m_lastH;
-        vector<double> m_lastOut;
+        std::vector<double> m_lastInput;
+        std::vector<double> m_lastH;
+        std::vector<double> m_lastOut;
 
         int m_updateCount;
         Classification m_lastClassification;
 
-        vector<double> buildFeatures(const string& input,
-                                     const map<string, double>& contextVector,
+        std::vector<double> buildFeatures(const std::string& input,
+                                     const std::map<std::string, double>& contextVector,
                                      hgnn::HyperGraphNeuralNet* hgnnNet,
                                      dtesnn::DeepTreeEchoStateNet* dtesnnNet) const;
 
-        vector<double> forward(const vector<double>& input);
-        void backward(const vector<double>& input,
+        std::vector<double> forward(const std::vector<double>& input);
+        void backward(const std::vector<double>& input,
                       int targetIndex,
                       double learningRate);
 
-        static vector<string> tokenize(const string& text);
-        static vector<double> softmax(const vector<double>& x);
-        static vector<double> tanhVec(const vector<double>& x);
+        static std::vector<std::string> tokenize(const std::string& text);
+        static std::vector<double> softmax(const std::vector<double>& x);
+        static std::vector<double> tanhVec(const std::vector<double>& x);
         static int systemToIndex(logic_meta_patterns::LogicSystem s);
         static logic_meta_patterns::LogicSystem indexToSystem(int idx);
     };
 
 } // namespace logic_classifier
 
-#endif // __LOGIC_CLASSIFIER_H__
+#endif // LOGIC_CLASSIFIER_H_

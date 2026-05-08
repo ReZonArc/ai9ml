@@ -3,6 +3,7 @@
 #include <sstream>
 #include <cctype>
 
+using namespace std;
 using namespace workflow_engine;
 using namespace logic_meta_patterns;
 
@@ -14,7 +15,8 @@ WorkflowEngine::WorkflowEngine()
 
 string WorkflowEngine::toUpper(const string& s) {
     string out = s;
-    transform(out.begin(), out.end(), out.begin(), ::toupper);
+    transform(out.begin(), out.end(), out.begin(),
+              [](unsigned char c) { return (char)::toupper(c); });
     return out;
 }
 

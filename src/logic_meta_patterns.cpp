@@ -1,14 +1,19 @@
 #include "logic_meta_patterns.h"
 #include <algorithm>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <sys/stat.h>
+#include <cerrno>
+#include <cstring>
 
+using namespace std;
 using namespace logic_meta_patterns;
 
 static string upperCopy(const string& s) {
     string out = s;
-    transform(out.begin(), out.end(), out.begin(), ::toupper);
+    transform(out.begin(), out.end(), out.begin(),
+              [](unsigned char c) { return (char)::toupper(c); });
     return out;
 }
 
@@ -97,7 +102,11 @@ string MetaPatternRegistry::systemToFilename(LogicSystem system) {
 }
 
 bool MetaPatternRegistry::writeAIMLFiles(const string& outputDir) const {
-    mkdir(outputDir.c_str(), 0755);
+    if (mkdir(outputDir.c_str(), 0755) != 0 && errno != EEXIST) {
+        cerr << "[MetaPatternRegistry] Failed to create directory "
+             << outputDir << ": " << strerror(errno) << endl;
+        return false;
+    }
 
     vector<LogicSystem> systems = {PL, FOL, MODAL, LINEAR, DTT, CAT_THEORY};
     for (auto system : systems) {

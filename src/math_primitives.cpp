@@ -6,6 +6,7 @@
 #include <sstream>
 #include <algorithm>
 
+using namespace std;
 using namespace math_primitives;
 
 static string joinTokens(const vector<string>& t, const string& sep = " ") {

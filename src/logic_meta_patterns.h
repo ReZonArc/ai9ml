@@ -1,11 +1,9 @@
-#ifndef __LOGIC_META_PATTERNS_H__
-#define __LOGIC_META_PATTERNS_H__
+#ifndef LOGIC_META_PATTERNS_H_
+#define LOGIC_META_PATTERNS_H_
 
 #include <string>
 #include <vector>
 #include <map>
-
-using namespace std;
 
 namespace logic_meta_patterns {
 
@@ -21,19 +19,19 @@ namespace logic_meta_patterns {
 
     struct MetaPattern {
         LogicSystem system;
-        string topic_guard;
-        string that_guard;
-        string pattern;
-        string template_action;
+        std::string topic_guard;
+        std::string that_guard;
+        std::string pattern;
+        std::string template_action;
 
         MetaPattern()
             : system(LOGIC_NONE) {}
 
         MetaPattern(LogicSystem s,
-                    const string& topic,
-                    const string& that,
-                    const string& pat,
-                    const string& action)
+                    const std::string& topic,
+                    const std::string& that,
+                    const std::string& pat,
+                    const std::string& action)
             : system(s), topic_guard(topic), that_guard(that),
               pattern(pat), template_action(action) {}
     };
@@ -42,23 +40,23 @@ namespace logic_meta_patterns {
     public:
         static MetaPatternRegistry& getInstance();
 
-        const vector<MetaPattern>& getPatterns() const { return m_patterns; }
-        vector<MetaPattern> getPatternsForSystem(LogicSystem system) const;
+        const std::vector<MetaPattern>& getPatterns() const { return m_patterns; }
+        std::vector<MetaPattern> getPatternsForSystem(LogicSystem system) const;
 
         // Generate AIML files grouped per logic system.
-        bool writeAIMLFiles(const string& outputDir) const;
+        bool writeAIMLFiles(const std::string& outputDir) const;
 
     private:
         MetaPatternRegistry();
-        vector<MetaPattern> m_patterns;
+        std::vector<MetaPattern> m_patterns;
 
         void addSystemPatterns();
-        static string systemToFilename(LogicSystem system);
+        static std::string systemToFilename(LogicSystem system);
     };
 
-    string toString(LogicSystem system);
-    LogicSystem logicSystemFromString(const string& text);
+    std::string toString(LogicSystem system);
+    LogicSystem logicSystemFromString(const std::string& text);
 
 } // namespace logic_meta_patterns
 
-#endif // __LOGIC_META_PATTERNS_H__
+#endif // LOGIC_META_PATTERNS_H_

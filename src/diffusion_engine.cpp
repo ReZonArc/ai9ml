@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <sys/stat.h>
+#include <cerrno>
+#include <cstring>
 
 using namespace diffusion_engine;
 
@@ -90,7 +92,11 @@ int DiffusionEngine::consolidateLearnedCategories(
     if (candidates.empty()) return 0;
 
     // Ensure output directory exists (best-effort).
-    mkdir(outputDir.c_str(), 0755);
+    if (mkdir(outputDir.c_str(), 0755) != 0 && errno != EEXIST) {
+        cerr << "[DiffusionEngine] Failed to create output directory "
+             << outputDir << ": " << strerror(errno) << endl;
+        return 0;
+    }
 
     // Group candidates that share the same generalised pattern key to merge
     // semantically redundant categories.
@@ -157,7 +163,11 @@ int DiffusionEngine::consolidateWorkflowCategories(
     auto candidates = engine->collectConsolidatedMetaPatterns(threshold);
     if (candidates.empty()) return 0;
 
-    mkdir(outputDir.c_str(), 0755);
+    if (mkdir(outputDir.c_str(), 0755) != 0 && errno != EEXIST) {
+        cerr << "[DiffusionEngine] Failed to create workflow output directory "
+             << outputDir << ": " << strerror(errno) << endl;
+        return 0;
+    }
     string filename = outputDir + "/workflow_" +
                       to_string((long long)time(nullptr)) + "_" +
                       to_string(m_consolidationCounter++) + ".aiml";
@@ -172,9 +182,17 @@ int DiffusionEngine::consolidateWorkflowCategories(
     out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         << "<aiml version=\"1.0\">\n";
 
+    map<string, vector<pair<string, string>>> grouped;
     for (const auto& p : candidates) {
-        out << "  <topic name=\"" << logic_meta_patterns::toString(p.system) << "\">\n";
-        out << formatAIMLCategory(p.pattern, p.template_action);
+        grouped[logic_meta_patterns::toString(p.system)]
+            .push_back({p.pattern, p.template_action});
+    }
+
+    for (const auto& systemEntry : grouped) {
+        out << "  <topic name=\"" << systemEntry.first << "\">\n";
+        for (const auto& cat : systemEntry.second) {
+            out << formatAIMLCategory(cat.first, cat.second);
+        }
         out << "  </topic>\n";
     }
 

@@ -1,5 +1,5 @@
-#ifndef __MATH_PRIMITIVES_H__
-#define __MATH_PRIMITIVES_H__
+#ifndef MATH_PRIMITIVES_H_
+#define MATH_PRIMITIVES_H_
 
 #include "aimlcategory.h"
 #include <string>
@@ -7,23 +7,20 @@
 #include <functional>
 #include <memory>
 
-using namespace std;
-using namespace aiml;
-
 namespace math_primitives {
 
     struct MathPrimitive {
-        string name;
+        std::string name;
         int arity;
-        string pattern;
-        string templateText;
-        function<string(const vector<string>&)> reducer;
+        std::string pattern;
+        std::string templateText;
+        std::function<std::string(const std::vector<std::string>&)> reducer;
 
         MathPrimitive() : arity(0) {}
-        MathPrimitive(const string& n, int a,
-                      const string& p,
-                      const string& t,
-                      function<string(const vector<string>&)> r)
+        MathPrimitive(const std::string& n, int a,
+                      const std::string& p,
+                      const std::string& t,
+                      std::function<std::string(const std::vector<std::string>&)> r)
             : name(n), arity(a), pattern(p), templateText(t), reducer(r) {}
     };
 
@@ -31,17 +28,17 @@ namespace math_primitives {
     public:
         static MathPrimitiveRegistry& getInstance();
 
-        const vector<MathPrimitive>& primitives() const { return m_primitives; }
+        const std::vector<MathPrimitive>& primitives() const { return m_primitives; }
 
-        vector<unique_ptr<Category>> generateCategories() const;
-        bool writeAIMLFile(const string& outputPath) const;
+        std::vector<std::unique_ptr<aiml::Category>> generateCategories() const;
+        bool writeAIMLFile(const std::string& outputPath) const;
 
     private:
         MathPrimitiveRegistry();
-        vector<MathPrimitive> m_primitives;
+        std::vector<MathPrimitive> m_primitives;
         void init();
     };
 
 } // namespace math_primitives
 
-#endif // __MATH_PRIMITIVES_H__
+#endif // MATH_PRIMITIVES_H_

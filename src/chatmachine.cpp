@@ -30,6 +30,8 @@
 #include <future>
 #include <chrono>
 #include <sys/stat.h>
+#include <cerrno>
+#include <cstring>
 #include "tinyxml.h"
 #include "aimlparser.h"
 #include "xml.h"
@@ -586,8 +588,14 @@ void Chatmachine::showChatGPT4oConfig() {
 
 void Chatmachine::initializeNSVD() {
     // Ensure logic AIML output directories exist and generate registry files.
-    mkdir("database", 0755);
-    mkdir("database/logic", 0755);
+    if (mkdir("database", 0755) != 0 && errno != EEXIST) {
+        cerr << "[NSVD] Failed to create directory database: "
+             << strerror(errno) << endl;
+    }
+    if (mkdir("database/logic", 0755) != 0 && errno != EEXIST) {
+        cerr << "[NSVD] Failed to create directory database/logic: "
+             << strerror(errno) << endl;
+    }
     math_primitives::MathPrimitiveRegistry::getInstance()
         .writeAIMLFile("database/logic/math_primitives.aiml");
     logic_meta_patterns::MetaPatternRegistry::getInstance()
@@ -762,7 +770,8 @@ string Chatmachine::nsvd_respond() {
     // Workflow reset command.
     {
         string upper = inputCopy;
-        transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+        transform(upper.begin(), upper.end(), upper.begin(),
+                  [](unsigned char c) { return (char)::toupper(c); });
         if (upper == "RESET WORKFLOW") {
             if (m_pWorkflowEngine) m_pWorkflowEngine->reset();
             m_lastLogicSystem = "NONE";

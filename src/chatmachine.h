@@ -53,6 +53,7 @@ namespace dtesnn {
 
 namespace aiml {
     class LearnableCategoryList;
+    class Category;
 }
 
 class Chatmachine {

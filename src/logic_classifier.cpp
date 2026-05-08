@@ -4,6 +4,7 @@
 #include <sstream>
 #include <cctype>
 
+using namespace std;
 using namespace logic_classifier;
 using namespace logic_meta_patterns;
 
@@ -37,7 +38,7 @@ vector<string> LogicClassifier::tokenize(const string& text) {
         string w;
         for (char c : tok) {
             if (isalpha((unsigned char)c) || c == '_')
-                w += (char)tolower((unsigned char)c);
+                w += tolower((unsigned char)c);
         }
         if (!w.empty()) out.push_back(w);
     }
