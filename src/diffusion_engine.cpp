@@ -1,10 +1,13 @@
 #include "diffusion_engine.h"
+#include "workflow_engine.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
 #include <cmath>
 #include <sys/stat.h>
+#include <cerrno>
+#include <cstring>
 
 using namespace diffusion_engine;
 
@@ -89,7 +92,11 @@ int DiffusionEngine::consolidateLearnedCategories(
     if (candidates.empty()) return 0;
 
     // Ensure output directory exists (best-effort).
-    mkdir(outputDir.c_str(), 0755);
+    if (mkdir(outputDir.c_str(), 0755) != 0 && errno != EEXIST) {
+        cerr << "[DiffusionEngine] Failed to create output directory "
+             << outputDir << ": " << strerror(errno) << endl;
+        return 0;
+    }
 
     // Group candidates that share the same generalised pattern key to merge
     // semantically redundant categories.
@@ -144,6 +151,57 @@ int DiffusionEngine::consolidateLearnedCategories(
     cout << "[DiffusionEngine] Consolidated " << exported
          << " learned categories -> " << filename << endl;
     return exported;
+}
+
+int DiffusionEngine::consolidateWorkflowCategories(
+    workflow_engine::WorkflowEngine* engine,
+    const string& outputDir,
+    double threshold)
+{
+    if (!engine) return 0;
+
+    auto candidates = engine->collectConsolidatedMetaPatterns(threshold);
+    if (candidates.empty()) return 0;
+
+    if (mkdir(outputDir.c_str(), 0755) != 0 && errno != EEXIST) {
+        cerr << "[DiffusionEngine] Failed to create workflow output directory "
+             << outputDir << ": " << strerror(errno) << endl;
+        return 0;
+    }
+    string filename = outputDir + "/workflow_" +
+                      to_string((long long)time(nullptr)) + "_" +
+                      to_string(m_consolidationCounter++) + ".aiml";
+
+    ofstream out(filename.c_str());
+    if (!out.is_open()) {
+        cerr << "[DiffusionEngine] Cannot write workflow consolidation to "
+             << filename << endl;
+        return 0;
+    }
+
+    out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        << "<aiml version=\"1.0\">\n";
+
+    map<string, vector<pair<string, string>>> grouped;
+    for (const auto& p : candidates) {
+        grouped[logic_meta_patterns::toString(p.system)]
+            .push_back({p.pattern, p.template_action});
+    }
+
+    for (const auto& systemEntry : grouped) {
+        out << "  <topic name=\"" << systemEntry.first << "\">\n";
+        for (const auto& cat : systemEntry.second) {
+            out << formatAIMLCategory(cat.first, cat.second);
+        }
+        out << "  </topic>\n";
+    }
+
+    out << "</aiml>\n";
+    out.close();
+
+    cout << "[DiffusionEngine] Consolidated " << candidates.size()
+         << " workflow categories -> " << filename << endl;
+    return (int)candidates.size();
 }
 
 // --- Diagnostics ---

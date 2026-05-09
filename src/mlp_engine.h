@@ -10,13 +10,13 @@
  *   - HGNN spatial embedding path          (score + 8-D feature vector)
  *   - DTESNN temporal reservoir path       (score + 8-D feature vector)
  *
- * Architecture:  MLP_INPUT_DIM(20) → H1(16) → H2(8) → OUTPUT(4)
+ * Architecture:  MLP_INPUT_DIM(21) → H1(16) → H2(8) → OUTPUT(5)
  *   Input layout:
- *     [0..3]   normalised path scores: symbolic, subsymbolic, hgnn, dtesnn
- *     [4..11]  HGNN aggregated embedding  (8-D)
- *     [12..19] DTESNN readout features    (8-D)
+ *     [0..4]   normalised path scores: symbolic, subsymbolic, hgnn, dtesnn, workflow
+ *     [5..12]  HGNN aggregated embedding  (8-D)
+ *     [13..20] DTESNN readout features    (8-D)
  *
- * Output: softmax over 4 blend weights (one per response path).
+ * Output: softmax over 5 blend weights (one per response path).
  *
  * Weight updates use online SGD with a cross-entropy loss against a
  * one-hot target built from whichever path produced the accepted response.
@@ -30,16 +30,17 @@ using namespace std;
 
 namespace mlp_engine {
 
-    static const int MLP_INPUT_DIM  = 20;
+    static const int MLP_INPUT_DIM  = 21;
     static const int MLP_HIDDEN1    = 16;
     static const int MLP_HIDDEN2    = 8;
-    static const int MLP_OUTPUT_DIM = 4;
+    static const int MLP_OUTPUT_DIM = 5;
 
     // Path indices into blend-weight vector.
     static const int PATH_SYMBOLIC    = 0;
     static const int PATH_SUBSYMBOLIC = 1;
     static const int PATH_HGNN        = 2;
     static const int PATH_DTESNN      = 3;
+    static const int PATH_WORKFLOW    = 4;
 
     class MLPEngine {
     public:
@@ -61,6 +62,7 @@ namespace mlp_engine {
         static vector<double> encodeFeatures(
             double symbolicScore,    double subSymbolicScore,
             double hgnnScore,        double dtesnnScore,
+            double workflowScore,
             const vector<double>& hgnnFeatures,
             const vector<double>& dtesnnFeatures);
 

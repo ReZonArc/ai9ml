@@ -15,15 +15,23 @@
 #include "mlp_engine.h"
 #include "hgnn.h"
 #include "dtesnn.h"
+#include "math_primitives.h"
+#include "logic_meta_patterns.h"
+#include "logic_classifier.h"
+#include "workflow_engine.h"
 #include <iostream>
 #include <sstream>
 #include <cstdlib>
 #include <cctype>
+#include <algorithm>
 #include <time.h>
 #include <string>
 #include <vector>
 #include <future>
 #include <chrono>
+#include <sys/stat.h>
+#include <cerrno>
+#include <cstring>
 #include "tinyxml.h"
 #include "aimlparser.h"
 #include "xml.h"
@@ -206,7 +214,7 @@ int main(int argc, char* argv[])
     cm.createCategoryLists();
 
     cout << "Type 'stats' to see knowledge statistics, 'gpt4o' to see ChatGPT-4o config,\n"
-         << "     'nsvd' to see NSVD stats, 'quit' to exit." << endl;
+         << "     'nsvd' to see NSVD stats, 'logic'/'workflow' for routing status, 'quit' to exit." << endl;
 
     while(1) {
         try {
@@ -223,6 +231,9 @@ int main(int argc, char* argv[])
                 continue;
             } else if (cm.m_sInput == "nsvd") {
                 cm.showNSVDStats();
+                continue;
+            } else if (cm.m_sInput == "logic" || cm.m_sInput == "workflow") {
+                cm.showLogicWorkflowStats();
                 continue;
             }
             
@@ -250,7 +261,9 @@ Chatmachine::Chatmachine(string str)
       m_pPatternLattice(nullptr), m_pConstraintEngine(nullptr),
       m_pDiffusionEngine(nullptr), m_pLearnableCategoryList(nullptr),
       m_pHGNN(nullptr), m_pDTESNN(nullptr), m_pMLP(nullptr),
-      m_turnCount(0), m_lastOuterLoopCount(0)
+      m_pLogicClassifier(nullptr), m_pWorkflowEngine(nullptr),
+      m_turnCount(0), m_lastOuterLoopCount(0),
+      m_lastLogicSystem("NONE"), m_lastLogicConfidence(0.0)
 {
     init_random();
     // OpenCog, ChatGPT-4o, and NSVD initialization will happen after categories are loaded
@@ -574,18 +587,42 @@ void Chatmachine::showChatGPT4oConfig() {
 // ---------------------------------------------------------------------------
 
 void Chatmachine::initializeNSVD() {
-    // PatternLattice — build over all loaded categories.
+    // Ensure logic AIML output directories exist and generate registry files.
+    if (mkdir("database", 0755) != 0 && errno != EEXIST) {
+        cerr << "[NSVD] Failed to create directory database: "
+             << strerror(errno) << endl;
+    }
+    if (mkdir("database/logic", 0755) != 0 && errno != EEXIST) {
+        cerr << "[NSVD] Failed to create directory database/logic: "
+             << strerror(errno) << endl;
+    }
+    math_primitives::MathPrimitiveRegistry::getInstance()
+        .writeAIMLFile("database/logic/math_primitives.aiml");
+    logic_meta_patterns::MetaPatternRegistry::getInstance()
+        .writeAIMLFiles("database/logic");
+
+    // PatternLattice — build over loaded categories + runtime math primitives.
     m_pPatternLattice.reset(new pattern_lattice::PatternLattice());
     vector<aiml::Category*> allCategories;
     for (auto& cl_item : cls) {
         for (auto& cat : cl_item->getCategories())
             allCategories.push_back(cat);
     }
+
+    m_runtimeCategories.clear();
+    auto primitives = math_primitives::MathPrimitiveRegistry::getInstance()
+        .generateCategories();
+    for (auto& p : primitives) {
+        allCategories.push_back(p.get());
+        m_runtimeCategories.push_back(std::move(p));
+    }
+
     m_pPatternLattice->build(allCategories);
     cout << "PatternLattice built: " << m_pPatternLattice->size()
          << " categories (" << m_pPatternLattice->wildcardCount()
          << " wildcard, " << m_pPatternLattice->specificCount()
-         << " specific)." << endl;
+         << " specific, including " << m_runtimeCategories.size()
+         << " math primitives)." << endl;
 
     // ConstraintEngine.
     m_pConstraintEngine.reset(new constraint_engine::ConstraintEngine());
@@ -625,6 +662,11 @@ void Chatmachine::initializeNSVD() {
              << mlp_engine::MLP_INPUT_DIM << ", output="
              << mlp_engine::MLP_OUTPUT_DIM << ")." << endl;
     }
+
+    // Logic classifier + workflow engine (independent of neural mode).
+    m_pLogicClassifier.reset(new logic_classifier::LogicClassifier());
+    m_pWorkflowEngine.reset(new workflow_engine::WorkflowEngine());
+    cout << "LogicClassifier and WorkflowEngine initialised." << endl;
 }
 
 void Chatmachine::showNSVDStats() {
@@ -652,10 +694,56 @@ void Chatmachine::showNSVDStats() {
         cout << "MLP updates:      " << m_pMLP->getUpdateCount()
              << "  lr=" << m_pMLP->getLearningRate() << endl;
     }
+    if (m_pLogicClassifier) {
+        cout << "Logic updates:    " << m_pLogicClassifier->getUpdateCount() << endl;
+    }
+    if (m_pWorkflowEngine) {
+        cout << "Workflow done:    " << m_pWorkflowEngine->getCompletionCount() << endl;
+        const auto& stats = m_pWorkflowEngine->getActivationStats();
+        if (!stats.empty()) {
+            cout << "Workflow activations: ";
+            for (auto it = stats.begin(); it != stats.end(); ++it) {
+                if (it != stats.begin()) cout << ", ";
+                cout << it->first << "=" << it->second;
+            }
+            cout << endl;
+        }
+    }
     if (m_pDiffusionEngine) {
         m_pDiffusionEngine->printDiffusionStats();
     }
     cout << "============================\n" << endl;
+}
+
+void Chatmachine::showLogicWorkflowStats() {
+    cout << "\n=== Logic / Workflow Status ===" << endl;
+    cout << "Last logic class: " << m_lastLogicSystem
+         << " (confidence=" << m_lastLogicConfidence << ")" << endl;
+    if (m_pLogicClassifier) {
+        cout << "Classifier updates: " << m_pLogicClassifier->getUpdateCount() << endl;
+    } else {
+        cout << "Classifier: not initialised" << endl;
+    }
+
+    if (m_pWorkflowEngine) {
+        cout << "Workflow active: " << (m_pWorkflowEngine->isActive() ? "Yes" : "No") << endl;
+        cout << "Active system: " << logic_meta_patterns::toString(m_pWorkflowEngine->getActiveSystem()) << endl;
+        cout << "Current step: " << m_pWorkflowEngine->getCurrentStepIndex()
+             << "/" << m_pWorkflowEngine->getStepCount() << endl;
+        cout << "Workflow completions: " << m_pWorkflowEngine->getCompletionCount() << endl;
+        const auto& vars = m_pWorkflowEngine->getVariables();
+        if (!vars.empty()) {
+            cout << "Bound vars: ";
+            for (auto it = vars.begin(); it != vars.end(); ++it) {
+                if (it != vars.begin()) cout << ", ";
+                cout << it->first << "=" << it->second;
+            }
+            cout << endl;
+        }
+    } else {
+        cout << "Workflow engine: not initialised" << endl;
+    }
+    cout << "===============================\n" << endl;
 }
 
 // ---------------------------------------------------------------------------
@@ -678,6 +766,19 @@ string Chatmachine::nsvd_respond() {
 
     // Capture input by value for lambdas (thread safety).
     string inputCopy = m_sInput;
+
+    // Workflow reset command.
+    {
+        string upper = inputCopy;
+        transform(upper.begin(), upper.end(), upper.begin(),
+                  [](unsigned char c) { return (char)::toupper(c); });
+        if (upper == "RESET WORKFLOW") {
+            if (m_pWorkflowEngine) m_pWorkflowEngine->reset();
+            m_lastLogicSystem = "NONE";
+            m_lastLogicConfidence = 0.0;
+            return "Workflow state reset.";
+        }
+    }
 
     // 3. Launch symbolic path asynchronously.
     auto symbFuture = std::async(std::launch::async,
@@ -713,11 +814,23 @@ string Chatmachine::nsvd_respond() {
         dtesnnLaunched = true;
     }
 
-    // 7. Collect results.
+    // 7. Workflow path (parallel): logic-system classifier + workflow sequencing.
+    std::future<SymbolicResult> workflowFuture;
+    bool workflowLaunched = false;
+    if (m_pWorkflowEngine && m_pLogicClassifier) {
+        workflowFuture = std::async(std::launch::async,
+            [this, inputCopy]() -> SymbolicResult {
+                return workflowPath(inputCopy);
+            });
+        workflowLaunched = true;
+    }
+
+    // 8. Collect results.
     SymbolicResult symbResult    = {"", 0.0, 0.0};
     SymbolicResult subSymResult  = {"", 0.0, 0.0};
     SymbolicResult hgnnResult    = {"", 0.0, 0.0};
     SymbolicResult dtesnnResult  = {"", 0.0, 0.0};
+    SymbolicResult workflowResult= {"", 0.0, 0.0};
 
     try { symbResult   = symbFuture.get();   }
     catch (const exception& e) { cerr << "[NSVD] Symbolic path error: "    << e.what() << endl; }
@@ -739,7 +852,13 @@ string Chatmachine::nsvd_respond() {
         catch (...) { cerr << "[NSVD] DTESNN path: unknown error" << endl; }
     }
 
-    // 8. Build candidate list.
+    if (workflowLaunched) {
+        try { workflowResult = workflowFuture.get(); }
+        catch (const exception& e) { cerr << "[NSVD] Workflow path error: " << e.what() << endl; }
+        catch (...) { cerr << "[NSVD] Workflow path: unknown error" << endl; }
+    }
+
+    // 9. Build candidate list.
     vector<ResponseCandidate> candidates;
     if (!symbResult.text.empty())
         candidates.emplace_back(symbResult.text, symbResult.score,
@@ -755,6 +874,13 @@ string Chatmachine::nsvd_respond() {
         dtesnnResult.text != subSymResult.text)
         candidates.emplace_back(dtesnnResult.text, dtesnnResult.score,
                                  "dtesnn", dtesnnResult.confidence);
+    if (!workflowResult.text.empty() &&
+        workflowResult.text != symbResult.text &&
+        workflowResult.text != subSymResult.text &&
+        workflowResult.text != dtesnnResult.text &&
+        workflowResult.text != hgnnResult.text)
+        candidates.emplace_back(workflowResult.text, workflowResult.score,
+                                 "workflow", workflowResult.confidence);
 
     // Add learned categories.
     if (m_pLearnableCategoryList && m_pPatternLattice) {
@@ -775,7 +901,7 @@ string Chatmachine::nsvd_respond() {
     if (candidates.empty())
         return "";
 
-    // 9. MLP blend weighting (neural mode only).
+    // 10. MLP blend weighting (neural mode only).
     //    Reweight candidate base-scores by the MLP's blend weights.
     int winningPath = -1;
     if (m_bNSVDNeural && m_pMLP && m_pHGNN && m_pDTESNN) {
@@ -797,6 +923,7 @@ string Chatmachine::nsvd_respond() {
         auto feat = MLPEngine::encodeFeatures(
             symbResult.score,   subSymResult.score,
             hgnnResult.score,   dtesnnResult.score,
+            workflowResult.score,
             hgnnFeats, dtesnnFeats);
 
         auto blendWeights = m_pMLP->forward(feat);
@@ -811,12 +938,13 @@ string Chatmachine::nsvd_respond() {
             else if (cand.source == "opencog")                              w = blendWeights[PATH_SUBSYMBOLIC];
             else if (cand.source == "hgnn")                                 w = blendWeights[PATH_HGNN];
             else if (cand.source == "dtesnn")                               w = blendWeights[PATH_DTESNN];
+            else if (cand.source == "workflow")                             w = blendWeights[PATH_WORKFLOW];
             cand.baseScore  = cand.baseScore  * (0.5 + 0.5 * w * (double)MLP_OUTPUT_DIM);
             cand.finalScore = cand.baseScore;
         }
     }
 
-    // 10. Apply constraint engine.
+    // 11. Apply constraint engine.
     ResponseCandidate best = m_pConstraintEngine->selectBestCandidate(
         candidates, constraints, contextVector, m_recentResponses);
 
@@ -826,11 +954,12 @@ string Chatmachine::nsvd_respond() {
         else if (best.source == "opencog")                              winningPath = PATH_SUBSYMBOLIC;
         else if (best.source == "hgnn")                                 winningPath = PATH_HGNN;
         else if (best.source == "dtesnn")                               winningPath = PATH_DTESNN;
+        else if (best.source == "workflow")                             winningPath = PATH_WORKFLOW;
     }
 
     string response = best.text;
 
-    // 11. GPT-4o fallback if still empty.
+    // 12. GPT-4o fallback if still empty.
     if (response.empty() && m_bChatGPT4oEnabled && m_pChatGPT4oIntegration &&
         m_pChatGPT4oIntegration->isConfigured())
     {
@@ -845,7 +974,7 @@ string Chatmachine::nsvd_respond() {
         }
     }
 
-    // 12. Post-response updates.
+    // 13. Post-response updates.
     if (!response.empty()) {
         updateNSVDState(inputCopy, response, winningPath);
         if (m_bNSVDLearning && best.source == "gpt4o")
@@ -1026,6 +1155,66 @@ Chatmachine::SymbolicResult Chatmachine::dtesnnPath(const string& input)
     return result;
 }
 
+Chatmachine::SymbolicResult Chatmachine::workflowPath(const string& input)
+{
+    SymbolicResult result = {"", 0.0, 0.0};
+    if (!m_pWorkflowEngine || !m_pLogicClassifier) return result;
+
+    map<string, double> contextVector;
+    if (m_pOpenCogIntegration)
+        contextVector = m_pOpenCogIntegration->getContextVector();
+
+    // Explicit user override: USE <SYSTEM>: <input>
+    logic_meta_patterns::LogicSystem overrideSystem = logic_meta_patterns::LOGIC_NONE;
+    string remainingInput;
+    if (m_pLogicClassifier->parseOverride(input, overrideSystem, remainingInput)) {
+        auto activated = m_pWorkflowEngine->activate(
+            overrideSystem,
+            remainingInput.empty() ? input : remainingInput);
+        if (!activated.response.empty()) {
+            result.text = activated.response;
+            result.score = activated.score;
+            result.confidence = activated.confidence;
+        }
+        m_lastLogicSystem = logic_meta_patterns::toString(overrideSystem);
+        m_lastLogicConfidence = 1.0;
+        if (overrideSystem != logic_meta_patterns::LOGIC_NONE) {
+            m_pLogicClassifier->reinforce(input, contextVector, m_pHGNN.get(), m_pDTESNN.get(),
+                                          overrideSystem, 0.05);
+        }
+        return result;
+    }
+
+    // Continue active workflow first.
+    if (m_pWorkflowEngine->isActive()) {
+        auto progressed = m_pWorkflowEngine->advance(input);
+        if (!progressed.response.empty()) {
+            result.text = progressed.response;
+            result.score = progressed.score;
+            result.confidence = progressed.confidence;
+        }
+        m_lastLogicSystem = logic_meta_patterns::toString(m_pWorkflowEngine->getActiveSystem());
+        m_lastLogicConfidence = progressed.confidence;
+        return result;
+    }
+
+    // Classify and activate if confidence is high enough.
+    auto c = m_pLogicClassifier->classify(input, contextVector, m_pHGNN.get(), m_pDTESNN.get());
+    m_lastLogicSystem = logic_meta_patterns::toString(c.system);
+    m_lastLogicConfidence = c.confidence;
+
+    if (c.system == logic_meta_patterns::LOGIC_NONE || c.confidence < 0.60)
+        return result;
+
+    auto activated = m_pWorkflowEngine->activate(c.system, input);
+    if (!activated.response.empty()) {
+        result.text = activated.response;
+        result.score = activated.score;
+        result.confidence = activated.confidence;
+    }
+    return result;
+}
+
 void Chatmachine::updateNSVDState(const string& input,
                                    const string& response,
                                    int winningPath) {
@@ -1079,9 +1268,23 @@ void Chatmachine::updateNSVDState(const string& input,
         auto dtesnnFeats = m_pDTESNN->getReadout();
 
         auto feat = mlp_engine::MLPEngine::encodeFeatures(
-            0.5, 0.5, 0.5, 0.5,   // placeholder scores for backward pass
+            0.5, 0.5, 0.5, 0.5, 0.5,   // placeholder scores for backward pass
             hgnnFeats, dtesnnFeats);
         m_pMLP->backward(feat, winningPath, m_pMLP->getLearningRate());
+    }
+
+    // Logic-classifier reinforcement when workflow path wins.
+    if (m_pLogicClassifier && winningPath == mlp_engine::PATH_WORKFLOW &&
+        !m_lastLogicSystem.empty() && m_lastLogicSystem != "NONE")
+    {
+        auto system = logic_meta_patterns::logicSystemFromString(m_lastLogicSystem);
+        if (system != logic_meta_patterns::LOGIC_NONE) {
+            map<string, double> contextVector;
+            if (m_pOpenCogIntegration)
+                contextVector = m_pOpenCogIntegration->getContextVector();
+            m_pLogicClassifier->reinforce(
+                input, contextVector, m_pHGNN.get(), m_pDTESNN.get(), system, 0.01);
+        }
     }
 
     // Middle-loop: HGNN forward pass (re-run message passing).
@@ -1132,6 +1335,10 @@ void Chatmachine::updateNSVDState(const string& input,
     {
         m_pDiffusionEngine->consolidateLearnedCategories(
             m_pLearnableCategoryList.get(), "database/Learned/");
+        if (m_pWorkflowEngine) {
+            m_pDiffusionEngine->consolidateWorkflowCategories(
+                m_pWorkflowEngine.get(), "database/logic/");
+        }
         m_pLearnableCategoryList->prune(0.02);
         m_pDiffusionEngine->garbageCollectBlends(0.05);
     }

@@ -34,6 +34,15 @@ namespace mlp_engine {
     class MLPEngine;
 }
 
+namespace logic_classifier {
+    class LogicClassifier;
+    struct Classification;
+}
+
+namespace workflow_engine {
+    class WorkflowEngine;
+}
+
 namespace hgnn {
     class HyperGraphNeuralNet;
 }
@@ -44,6 +53,7 @@ namespace dtesnn {
 
 namespace aiml {
     class LearnableCategoryList;
+    class Category;
 }
 
 class Chatmachine {
@@ -73,6 +83,7 @@ public:
     void setNSVDNeural(bool enabled)      { m_bNSVDNeural    = enabled; }
     void initializeNSVD();
     void showNSVDStats();
+    void showLogicWorkflowStats();
     
     // Public access to input for main loop
     string m_sInput;
@@ -102,6 +113,9 @@ private:
 
     // DTESNN async path: temporally-scored result.
     SymbolicResult dtesnnPath(const string& input);
+
+    // Workflow path: logic-system classification + operational workflow routing.
+    SymbolicResult workflowPath(const string& input);
 
     // Synthesise a learnable category if the GPT-4o response is novel enough.
     void maybeSynthesizeCategory(const string& input, const string& response);
@@ -145,10 +159,15 @@ private:
     unique_ptr<hgnn::HyperGraphNeuralNet>            m_pHGNN;
     unique_ptr<dtesnn::DeepTreeEchoStateNet>         m_pDTESNN;
     unique_ptr<mlp_engine::MLPEngine>                m_pMLP;
+    unique_ptr<logic_classifier::LogicClassifier>    m_pLogicClassifier;
+    unique_ptr<workflow_engine::WorkflowEngine>      m_pWorkflowEngine;
+    vector<unique_ptr<aiml::Category>>               m_runtimeCategories;
 
     vector<string> m_recentResponses;   // rolling window for anti-repetition
     int            m_turnCount;
     int            m_lastOuterLoopCount; // tracks outer-loop completion for lr decay
+    string         m_lastLogicSystem;
+    double         m_lastLogicConfidence;
 };
 
 #endif
